@@ -6,11 +6,13 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { GgsqlCodeLensProvider, registerCellCommands } from './codelens';
 import { activateDecorations } from './decorations';
 import { activateContextKeys } from './context';
 import { parseCells } from './cellParser';
 import { runQuery, workingDirFor, GgsqlError } from './runner';
+import { findDbtProjectRoot, planDbtQuery, runDbtShow, writeRowsCache } from './dbt';
 import { GgsqlResultPanel } from './panel';
 import { log, outputChannel } from './logging';
 
@@ -55,6 +57,69 @@ async function executeQueries(
 }
 
 /**
+ * Run a dbt-project file containing a VISUALISE clause: the SQL part is
+ * compiled and executed by the dbt CLI against the project's target, the
+ * rows are cached to a local JSON file, and ggsql renders the VISUALISE
+ * part from that file via its duckdb reader.
+ */
+async function runDbtVisualisation(
+    context: vscode.ExtensionContext,
+    document: vscode.TextDocument,
+): Promise<void> {
+    if (document.uri.scheme !== 'file') {
+        void vscode.window.showErrorMessage('ggsql: Save the file to disk before running it with dbt.');
+        return;
+    }
+    let plan;
+    try {
+        plan = planDbtQuery(document.getText());
+    } catch (e) {
+        const message = e instanceof GgsqlError ? e.message : String(e);
+        void vscode.window.showErrorMessage(`ggsql: ${message}`);
+        return;
+    }
+    if (!plan) {
+        void vscode.window.showErrorMessage('ggsql: No VISUALISE clause found in this file.');
+        return;
+    }
+    const projectRoot = findDbtProjectRoot(path.dirname(document.uri.fsPath));
+    if (!projectRoot) {
+        void vscode.window.showErrorMessage('ggsql: No dbt_project.yml found above this file.');
+        return;
+    }
+
+    await vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Window,
+            title: 'Running dbt query...',
+        },
+        async () => {
+            try {
+                const rows = await runDbtShow(plan.dbtSql, projectRoot);
+                if (rows.length === 0) {
+                    throw new GgsqlError('The dbt query returned no rows.');
+                }
+                const cachePath = await writeRowsCache(rows, context.globalStorageUri);
+                log(`Cached ${rows.length} rows to ${cachePath}`);
+                const query = plan.buildRenderQuery(cachePath);
+                // The data already sits in the local cache file, so ignore
+                // any custom ggsql.reader and read it with in-memory duckdb.
+                const result = await runQuery(query, projectRoot, 'duckdb://memory');
+                if (result.stderr) {
+                    log(result.stderr);
+                }
+                GgsqlResultPanel.show(context.extensionUri, result.specs);
+            } catch (e) {
+                const message = e instanceof GgsqlError ? e.message : String(e);
+                log(`dbt visualization failed: ${message}`);
+                outputChannel.show(true);
+                void vscode.window.showErrorMessage(`ggsql: ${message}`);
+            }
+        }
+    );
+}
+
+/**
  * Activates the extension.
  *
  * @param context The extension context
@@ -87,6 +152,18 @@ export function activate(context: vscode.ExtensionContext): void {
                     execute([code]);
                 }
             }
+        })
+    );
+
+    // "Render ggsql Visualization" for sql/jinja-sql files inside a dbt
+    // project (shown when the file contains a VISUALISE clause).
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ggsql.renderDbtFile', () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                return;
+            }
+            void runDbtVisualisation(context, editor.document);
         })
     );
 

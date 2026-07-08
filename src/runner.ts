@@ -75,9 +75,11 @@ export function parseJsonDocuments(text: string): object[] {
  * @param query The ggsql source to execute
  * @param cwd Working directory for the CLI (so relative file paths like
  *            FROM 'data.csv' resolve next to the document)
+ * @param readerOverride Reader to use instead of the `ggsql.reader` setting
  */
-export function runQuery(query: string, cwd?: string): Promise<RunResult> {
-    const { executable, reader } = getConfig();
+export function runQuery(query: string, cwd?: string, readerOverride?: string): Promise<RunResult> {
+    const { executable, reader: configuredReader } = getConfig();
+    const reader = readerOverride ?? configuredReader;
     log(`Running ggsql exec --reader ${reader} (cwd: ${cwd ?? process.cwd()})`);
 
     return new Promise((resolve, reject) => {

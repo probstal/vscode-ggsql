@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- dbt integration: `sql`/`jinja-sql` files inside a dbt project that contain the `VISUALISE`/`VISUALIZE`
+  keyword get a "Render ggsql Visualization" run button.
+  The SQL part is compiled and executed by the dbt CLI using `dbt show`
+  and the VISUALISE part is rendered by ggsql reading that file through its duckdb reader.
+- New setting: `ggsql.dbtPath` (path to the `dbt` executable, defaults to
+  `dbt` on PATH).
+
 ## 0.1.0
 
 - Converted to a pure VS Code extension: removed the Positron language runtime,

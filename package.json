@@ -2,14 +2,16 @@
   "name": "vscode-ggsql",
   "displayName": "ggsql",
   "description": "Language support for ggsql - SQL with declarative visualization. Runs queries via the ggsql CLI and renders charts with Vega-Lite.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "probstal",
   "engines": {
     "vscode": "^1.75.0"
   },
   "main": "./out/extension.js",
   "activationEvents": [
-    "onLanguage:ggsql"
+    "onLanguage:ggsql",
+    "onLanguage:sql",
+    "onLanguage:jinja-sql"
   ],
   "categories": [
     "Programming Languages",
@@ -49,6 +51,14 @@
         "language": "ggsql",
         "scopeName": "source.ggsql",
         "path": "./syntaxes/ggsql.tmLanguage.json"
+      },
+      {
+        "scopeName": "ggsql.injection",
+        "path": "./syntaxes/ggsql.injection.tmLanguage.json",
+        "injectTo": [
+          "source.sql",
+          "source.sql.jinja"
+        ]
       }
     ],
     "commands": [
@@ -77,6 +87,12 @@
         "command": "ggsql.runCurrentAdvance",
         "category": "ggsql",
         "title": "Run Query and Advance"
+      },
+      {
+        "command": "ggsql.renderDbtFile",
+        "category": "ggsql",
+        "title": "Render ggsql Visualization",
+        "icon": "$(graph)"
       }
     ],
     "keybindings": [
@@ -104,6 +120,11 @@
           "command": "ggsql.sourceCurrentFile",
           "group": "navigation@0",
           "when": "resourceLangId == ggsql && !isInDiffEditor"
+        },
+        {
+          "command": "ggsql.renderDbtFile",
+          "group": "navigation@1",
+          "when": "(resourceLangId == sql || resourceLangId == jinja-sql) && ggsql.isDbtVisualiseFile && !isInDiffEditor"
         }
       ]
     },
@@ -120,6 +141,11 @@
           "type": "string",
           "default": "",
           "description": "Path to the ggsql executable. If empty, uses 'ggsql' from PATH."
+        },
+        "ggsql.dbtPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the dbt executable used for dbt-project files (e.g. the dbt inside your project's virtualenv). If empty, uses 'dbt' from PATH."
         }
       }
     }

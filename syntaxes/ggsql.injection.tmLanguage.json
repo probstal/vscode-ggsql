@@ -1,0 +1,70 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "ggsql injection",
+  "scopeName": "ggsql.injection",
+  "injectionSelector": "L:source.sql -string -comment, L:source.sql.jinja -string -comment",
+  "patterns": [
+    {
+      "comment": "Only activate ggsql highlighting from a VISUALISE keyword onward, so ggsql clause words (LABEL, SCALE, ...) appearing in plain SQL are left to the host grammar. The begin consumes the keyword (a zero-width lookahead would trip vscode-textmate's injection loop protection), so the clause body up to the first DRAW/SCALE/... is highlighted by the patterns below, mirroring source.ggsql#visualise-clause. Ends when a new SQL statement starts.",
+      "begin": "(?i)\\b(VISUALISE|VISUALIZE)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.ggsql"
+        }
+      },
+      "end": "(?i)(?=\\b(SELECT|WITH)\\b)",
+      "name": "meta.embedded.block.ggsql",
+      "patterns": [
+        {
+          "include": "source.ggsql#visualise-clause"
+        },
+        {
+          "include": "source.ggsql#draw-clause"
+        },
+        {
+          "include": "source.ggsql#place-clause"
+        },
+        {
+          "include": "source.ggsql#scale-clause"
+        },
+        {
+          "include": "source.ggsql#facet-clause"
+        },
+        {
+          "include": "source.ggsql#project-clause"
+        },
+        {
+          "include": "source.ggsql#label-clause"
+        },
+        {
+          "include": "source.ggsql#comments"
+        },
+        {
+          "include": "source.ggsql#strings"
+        },
+        {
+          "include": "source.ggsql#numbers"
+        },
+        {
+          "include": "source.ggsql#aesthetics"
+        },
+        {
+          "name": "keyword.other.ggsql",
+          "match": "\\b(?i:AS|FROM|FILTER)\\b"
+        },
+        {
+          "name": "keyword.operator.fatarrow.ggsql",
+          "match": "=>"
+        },
+        {
+          "name": "punctuation.separator.comma.ggsql",
+          "match": ","
+        },
+        {
+          "name": "keyword.operator.wildcard.ggsql",
+          "match": "\\*"
+        }
+      ]
+    }
+  ]
+}
