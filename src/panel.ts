@@ -95,25 +95,30 @@ function getHtml(webview: vscode.Webview, scriptUri: vscode.Uri): string {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ggsql Results</title>
     <style>
+        /* The whole chain needs definite heights: .chart-body resolves its
+           percentage height against .chart, which is only definite when the
+           flex container (#charts) itself has a definite height. */
         html, body {
             height: 100%;
         }
         body {
             margin: 0;
-            padding: 12px;
-            box-sizing: border-box;
+            padding: 0;
             font-family: var(--vscode-font-family);
         }
         #charts {
             display: flex;
             flex-direction: column;
             gap: 12px;
-            min-height: 100%;
+            height: 100%;
+            padding: 12px;
+            box-sizing: border-box;
+            overflow-y: auto;
         }
-        /* Charts use Vega-Lite "container" sizing: each card fills the panel
-           and the chart fits itself to the card's dimensions. */
+        /* Cards split the panel height evenly; with many charts they stop
+           shrinking at 300px and #charts scrolls instead. */
         .chart {
-            flex: 1;
+            flex: 1 1 0;
             min-height: 300px;
             background: #ffffff;
             border-radius: 4px;
