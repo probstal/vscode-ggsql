@@ -49,7 +49,7 @@ function findNextCell(cells: Cell[], line: number): Cell | undefined {
 
 export function registerCellCommands(
 	context: vscode.ExtensionContext,
-	executeCode: (code: string) => void,
+	executeCode: (codes: string[]) => void,
 ): void {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('ggsql.runQuery', (line?: number) => {
@@ -60,7 +60,7 @@ export function registerCellCommands(
 				? findCellAtLine(cells, line)
 				: findCellAtLine(cells, editor.selection.active.line);
 			if (cell && cell.text.length > 0) {
-				executeCode(cell.text);
+				executeCode([cell.text]);
 			}
 		}),
 
@@ -71,7 +71,7 @@ export function registerCellCommands(
 			const targetLine = line ?? editor.selection.active.line;
 			const cell = findCellAtLine(cells, targetLine);
 			if (cell && cell.text.length > 0) {
-				executeCode(cell.text);
+				executeCode([cell.text]);
 			}
 			const next = findNextCell(cells, targetLine);
 			if (next) {
@@ -87,13 +87,13 @@ export function registerCellCommands(
 			if (!editor || editor.document.languageId !== 'ggsql') { return; }
 			const cells = parseCells(editor.document);
 			const cursor = new vscode.Position(line ?? editor.selection.active.line, 0);
-			cells
+			const codes = cells
 				.filter(cell => cell.range.start.isBefore(cursor) && !cell.range.contains(cursor))
-				.forEach(cell => {
-					if (cell.text.length > 0) {
-						executeCode(cell.text);
-					}
-				});
+				.map(cell => cell.text)
+				.filter(text => text.length > 0);
+			if (codes.length > 0) {
+				executeCode(codes);
+			}
 		}),
 
 		vscode.commands.registerCommand('ggsql.runNextCell', (line?: number) => {
@@ -103,7 +103,7 @@ export function registerCellCommands(
 			const targetLine = line ?? editor.selection.active.line;
 			const next = findNextCell(cells, targetLine);
 			if (next && next.text.length > 0) {
-				executeCode(next.text);
+				executeCode([next.text]);
 				const goTo = Math.min(next.range.start.line + 1, next.range.end.line);
 				const pos = new vscode.Position(goTo, 0);
 				editor.selection = new vscode.Selection(pos, pos);

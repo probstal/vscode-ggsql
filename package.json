@@ -1,18 +1,19 @@
 {
-  "name": "ggsql",
+  "name": "vscode-ggsql",
   "displayName": "ggsql",
-  "description": "Syntax highlighting and language runtime for ggsql - SQL with declarative visualization",
-  "version": "0.4.1",
-  "publisher": "ggsql",
+  "description": "Language support for ggsql - SQL with declarative visualization. Runs queries via the ggsql CLI and renders charts with Vega-Lite.",
+  "version": "0.1.0",
+  "publisher": "probstal",
   "engines": {
     "vscode": "^1.75.0"
   },
   "main": "./out/extension.js",
   "activationEvents": [
-    "onStartupFinished"
+    "onLanguage:ggsql"
   ],
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Visualization"
   ],
   "keywords": [
     "ggsql",
@@ -23,7 +24,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/posit-dev/ggsql"
+    "url": "https://github.com/probstal/vscode-ggsql"
   },
   "license": "MIT",
   "icon": "logo.png",
@@ -38,8 +39,8 @@
         ],
         "configuration": "./language-configuration.json",
         "icon": {
-          "light": "./icon.png",
-          "dark": "./icon.png"
+          "light": "./logo.png",
+          "dark": "./logo.png"
         }
       }
     ],
@@ -50,16 +51,11 @@
         "path": "./syntaxes/ggsql.tmLanguage.json"
       }
     ],
-    "languageRuntimes": [
-      {
-        "languageId": "ggsql"
-      }
-    ],
     "commands": [
       {
         "command": "ggsql.sourceCurrentFile",
         "category": "ggsql",
-        "title": "Source Current File",
+        "title": "Run File",
         "icon": "$(play)"
       },
       {
@@ -108,10 +104,6 @@
           "command": "ggsql.sourceCurrentFile",
           "group": "navigation@0",
           "when": "resourceLangId == ggsql && !isInDiffEditor"
-        },
-        {
-          "command": "workbench.action.positronConsole.executeCode",
-          "when": "resourceLangId == ggsql && !isInDiffEditor"
         }
       ]
     },
@@ -119,10 +111,15 @@
       "type": "object",
       "title": "ggsql",
       "properties": {
-        "ggsql.kernelPath": {
+        "ggsql.reader": {
+          "type": "string",
+          "default": "duckdb://memory",
+          "description": "Data source connection string passed to the ggsql CLI via --reader (e.g. duckdb://memory, duckdb://path/to.db, sqlite://path/to.db, odbc://...)."
+        },
+        "ggsql.executablePath": {
           "type": "string",
           "default": "",
-          "description": "Path to the ggsql-jupyter executable. If empty, uses 'ggsql-jupyter' from PATH."
+          "description": "Path to the ggsql executable. If empty, uses 'ggsql' from PATH."
         }
       }
     }
@@ -137,11 +134,7 @@
     "check-types": "tsc --noEmit",
     "lint": "eslint src --ext ts"
   },
-  "dependencies": {
-    "toml": "^3.0.0"
-  },
   "devDependencies": {
-    "@posit-dev/positron": "^0.2.2",
     "@types/node": "^18.x",
     "@types/vscode": "^1.75.0",
     "@typescript-eslint/eslint-plugin": "^8.57.1",
@@ -149,7 +142,10 @@
     "esbuild": "^0.27.4",
     "eslint": "^10.0.3",
     "npm-run-all": "^4.1.5",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vega": "^6.2.0",
+    "vega-interpreter": "^2.2.1",
+    "vega-lite": "^6.4.0"
   },
   "overrides": {
     "uri-js": "npm:uri-js-replace"

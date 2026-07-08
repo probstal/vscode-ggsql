@@ -1,1 +1,118 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# IDEs and Editors
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Tree-sitter generated files
+/tree-sitter-ggsql/src/parser.c
+/tree-sitter-ggsql/src/tree_sitter/
+/tree-sitter-ggsql/src/node-types.json
+/tree-sitter-ggsql/src/grammar.json
+
+# Node.js (for tree-sitter CLI)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+
+# Python virtual environments
+venv/
+.venv/
+
+# Dev environment
+/_dev/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.bak
+
+# Data files (examples/testing)
+*.csv
+*.parquet
+*.db
+*.sqlite
+*.sqlite3
+!src/data/*.parquet
+!doc/assets/data/*.csv
+!doc/gallery/examples/*.csv
+
+# Configuration files
+.env
+.env.local
+.env.production
+config.toml
+!.cargo/config.toml
+secrets.toml
+
+# Generated documentation
+target/doc/
+doc/_site/
+
+# Profiling data
+perf.data*
+*.prof
+
+# Benchmark results
+criterion/
+
+# WASM artifacts
+/ggsql-wasm/pkg/
+/ggsql-wasm/demo/dist/
+/ggsql-wasm/library/dist/
+
+# C/C++ build artifacts (from tree-sitter)
+*.o
+*.a
+*.dylib
+*.dll
+*.exe
+
+# VSCode build
+*.vsix
+
+# Claude Code specific
+.claude/
+memory
+!CLAUDE.md
+
+# R specific
+*.Rproj.user
+*.Rproj
+*.Rhistory
+*.Rdata
+.Rproj.user
+ggsql.Rcheck/
+
+# cargo-packager artifacts
+*.msi
+*.deb
+*.rpm
+*.dmg
+*.AppImage
+.cargo-packager/
+
 out

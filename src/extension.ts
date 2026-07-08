@@ -1,24 +1,57 @@
 /*
  * ggsql VS Code Extension
  *
- * Provides syntax highlighting for ggsql and, when running in Positron,
- * a language runtime that wraps the ggsql-jupyter kernel.
+ * Provides syntax highlighting for ggsql and runs queries through the
+ * ggsql CLI, rendering the resulting Vega-Lite specs in a webview panel.
  */
 
 import * as vscode from 'vscode';
-import { tryAcquirePositronApi } from '@posit-dev/positron';
-import { GgsqlRuntimeManager } from './manager';
-import { createConnectionDrivers } from './connections';
 import { GgsqlCodeLensProvider, registerCellCommands } from './codelens';
 import { activateDecorations } from './decorations';
 import { activateContextKeys } from './context';
 import { parseCells } from './cellParser';
+import { runQuery, workingDirFor, GgsqlError } from './runner';
+import { GgsqlResultPanel } from './panel';
+import { log, outputChannel } from './logging';
 
-// Output channel for logging
-const outputChannel = vscode.window.createOutputChannel('ggsql');
+/**
+ * Run one or more ggsql queries against the active document's working
+ * directory and show the resulting visualizations in the results panel.
+ */
+async function executeQueries(
+    extensionUri: vscode.Uri,
+    document: vscode.TextDocument,
+    queries: string[],
+): Promise<void> {
+    const cwd = workingDirFor(document);
 
-export function log(message: string): void {
-    outputChannel.appendLine(`[${new Date().toISOString()}] ${message}`);
+    await vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Window,
+            title: 'Running ggsql query...',
+        },
+        async () => {
+            const specs: object[] = [];
+            for (const query of queries) {
+                try {
+                    const result = await runQuery(query, cwd);
+                    specs.push(...result.specs);
+                    if (result.stderr) {
+                        log(result.stderr);
+                    }
+                } catch (e) {
+                    const message = e instanceof GgsqlError ? e.message : String(e);
+                    log(`Query failed: ${message}`);
+                    outputChannel.show(true);
+                    void vscode.window.showErrorMessage(`ggsql: ${message}`);
+                    return;
+                }
+            }
+            if (specs.length > 0) {
+                GgsqlResultPanel.show(extensionUri, specs);
+            }
+        }
+    );
 }
 
 /**
@@ -29,54 +62,30 @@ export function log(message: string): void {
 export function activate(context: vscode.ExtensionContext): void {
     log('ggsql extension activating...');
 
-    // Try to acquire the Positron API
-    const positronApi = tryAcquirePositronApi();
+    const execute = (queries: string[]) => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            return;
+        }
+        void executeQueries(context.extensionUri, editor.document, queries);
+    };
 
-    if (!positronApi) {
-        // Running in VS Code (not Positron) - syntax highlighting still works
-        // but we don't register the language runtime
-        log('Positron API not available - running in VS Code mode');
-        return;
-    }
-
-    log('Positron API acquired - registering runtime manager');
-
-    // Running in Positron - register the ggsql runtime manager
-    const manager = new GgsqlRuntimeManager(context);
-    const disposable = positronApi.runtime.registerLanguageRuntimeManager('ggsql', manager);
-    context.subscriptions.push(disposable);
-
-    log('ggsql runtime manager registered successfully');
-
-    // Register connection drivers for the Connections pane
-    const drivers = createConnectionDrivers(positronApi);
-    for (const driver of drivers) {
-        const driverDisposable = positronApi.connections.registerConnectionDriver(driver);
-        context.subscriptions.push(driverDisposable);
-    }
-
-    log(`Registered ${drivers.length} connection drivers`);
-
-    // Register "Source Current File" command for the editor run button
+    // "Run File" command for the editor run button: executes the whole file
+    // as a single ggsql query (a file can contain multiple statements).
     context.subscriptions.push(
-        vscode.commands.registerCommand('ggsql.sourceCurrentFile', async () => {
+        vscode.commands.registerCommand('ggsql.sourceCurrentFile', () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor || editor.document.languageId !== 'ggsql') {
                 return;
             }
             const cells = parseCells(editor.document);
             if (cells.length > 0) {
-                for (const cell of cells) {
-                    if (cell.text.length > 0) {
-                        positronApi.runtime.executeCode('ggsql', cell.text, false, true);
-                    }
-                }
+                execute(cells.map(cell => cell.text).filter(text => text.length > 0));
             } else {
                 const code = editor.document.getText();
-                if (code.trim().length === 0) {
-                    return;
+                if (code.trim().length > 0) {
+                    execute([code]);
                 }
-                positronApi.runtime.executeCode('ggsql', code, true);
             }
         })
     );
@@ -85,12 +94,12 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.languages.registerCodeLensProvider('ggsql', new GgsqlCodeLensProvider()),
     );
-    registerCellCommands(context, (code) => {
-        positronApi.runtime.executeCode('ggsql', code, false, true);
-    });
+    registerCellCommands(context, execute);
 
     activateDecorations(context.subscriptions);
     activateContextKeys(context.subscriptions);
+
+    log('ggsql extension activated');
 }
 
 /**
