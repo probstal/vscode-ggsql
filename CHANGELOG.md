@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Updated the README with VS Code Marketplace install instructions
+
 ## 0.2.0
 
 - dbt integration: `sql`/`jinja-sql` files inside a dbt project that contain the `VISUALISE`/`VISUALIZE`

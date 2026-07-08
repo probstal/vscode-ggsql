@@ -2,7 +2,7 @@
 
 [ggsql](https://ggsql.org) is a SQL extension for declarative data visualization based on Grammar of Graphics principles. It combines SQL data queries with visualization specifications in a single, composable syntax.
 
-This project is a fork of the official [ggsql-vscode extension](https://github.com/posit-dev/ggsql/tree/main/ggsql-vscode) and focuses on extensive features for VS Code instead of [Positron IDE](https://positron.posit.co/).
+This project is a fork of the official [ggsql-vscode extension](https://github.com/posit-dev/ggsql/tree/main/ggsql-vscode) and focuses on extensive features for VS Code and [dbt](https://www.getdbt.com).
 
 ## Features
 
@@ -69,6 +69,12 @@ When run, the SQL part (everything before `VISUALISE`) is compiled and executed 
 This requires the `dbt` executable (configure `ggsql.dbtPath` if it lives in a virtualenv) in addition to the `ggsql` CLI. **Note that Jinja inside the `VISUALISE` part itself is not compiled.**
 
 ## Installation
+
+### VS Code Marketplace
+
+The extension is available on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=probstal.vscode-ggsql).
+
+### Manual
 
 You can download the extension from the GitHub releases and install it manually:
 
