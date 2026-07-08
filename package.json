@@ -1,0 +1,157 @@
+{
+  "name": "ggsql",
+  "displayName": "ggsql",
+  "description": "Syntax highlighting and language runtime for ggsql - SQL with declarative visualization",
+  "version": "0.4.1",
+  "publisher": "ggsql",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "ggsql",
+    "sql",
+    "visualization",
+    "grammar-of-graphics",
+    "data-viz"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/posit-dev/ggsql"
+  },
+  "license": "MIT",
+  "icon": "logo.png",
+  "contributes": {
+    "languages": [
+      {
+        "id": "ggsql",
+        "extensions": [
+          ".ggsql",
+          ".ggsql.sql",
+          ".gsql"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icon.png",
+          "dark": "./icon.png"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ggsql",
+        "scopeName": "source.ggsql",
+        "path": "./syntaxes/ggsql.tmLanguage.json"
+      }
+    ],
+    "languageRuntimes": [
+      {
+        "languageId": "ggsql"
+      }
+    ],
+    "commands": [
+      {
+        "command": "ggsql.sourceCurrentFile",
+        "category": "ggsql",
+        "title": "Source Current File",
+        "icon": "$(play)"
+      },
+      {
+        "command": "ggsql.runQuery",
+        "category": "ggsql",
+        "title": "Run Query"
+      },
+      {
+        "command": "ggsql.runCellsAbove",
+        "category": "ggsql",
+        "title": "Run Cells Above"
+      },
+      {
+        "command": "ggsql.runNextCell",
+        "category": "ggsql",
+        "title": "Run Next Cell"
+      },
+      {
+        "command": "ggsql.runCurrentAdvance",
+        "category": "ggsql",
+        "title": "Run Query and Advance"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "ggsql.runCurrentAdvance",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && editorLangId == ggsql && ggsql.hasCodeCells && !findInputFocussed && !replaceInputFocussed"
+      },
+      {
+        "command": "ggsql.runCurrentAdvance",
+        "key": "shift+enter",
+        "when": "editorTextFocus && editorLangId == ggsql && ggsql.hasCodeCells && !findInputFocussed && !replaceInputFocussed"
+      },
+      {
+        "command": "ggsql.runQuery",
+        "key": "ctrl+shift+enter",
+        "mac": "cmd+shift+enter",
+        "when": "editorTextFocus && editorLangId == ggsql && ggsql.hasCodeCells && !findInputFocussed && !replaceInputFocussed"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "ggsql.sourceCurrentFile",
+          "group": "navigation@0",
+          "when": "resourceLangId == ggsql && !isInDiffEditor"
+        },
+        {
+          "command": "workbench.action.positronConsole.executeCode",
+          "when": "resourceLangId == ggsql && !isInDiffEditor"
+        }
+      ]
+    },
+    "configuration": {
+      "type": "object",
+      "title": "ggsql",
+      "properties": {
+        "ggsql.kernelPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the ggsql-jupyter executable. If empty, uses 'ggsql-jupyter' from PATH."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && node esbuild.js --production",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src --ext ts"
+  },
+  "dependencies": {
+    "toml": "^3.0.0"
+  },
+  "devDependencies": {
+    "@posit-dev/positron": "^0.2.2",
+    "@types/node": "^18.x",
+    "@types/vscode": "^1.75.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.1",
+    "@typescript-eslint/parser": "^8.57.1",
+    "esbuild": "^0.27.4",
+    "eslint": "^10.0.3",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.0.0"
+  },
+  "overrides": {
+    "uri-js": "npm:uri-js-replace"
+  }
+}

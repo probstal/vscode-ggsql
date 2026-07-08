@@ -1,0 +1,242 @@
+-- ggsql Example Queries
+-- Demonstrates syntax highlighting for all major features
+
+-- ============================================================================
+-- Example 1: Basic Scatter Plot with File Path
+-- ============================================================================
+VISUALISE hp AS x, mpg AS y, cyl AS color FROM 'mtcars.csv'
+DRAW point
+LABEL title => 'Horsepower vs Fuel Efficiency',
+      x => 'Horsepower',
+      y => 'Miles per Gallon'
+
+-- ============================================================================
+-- Example 2: Multi-Layer Visualization with CTE
+-- ============================================================================
+WITH monthly_sales AS (
+    SELECT
+        DATE_TRUNC('month', sale_date) as month,
+        region,
+        SUM(quantity) as total_quantity,
+        SUM(revenue) as total_revenue
+    FROM sales
+    WHERE sale_date >= '2024-01-01'
+    GROUP BY DATE_TRUNC('month', sale_date), region
+)
+VISUALISE month AS x, total_quantity AS y, region AS color FROM monthly_sales
+DRAW line
+DRAW point SETTING size => 3
+SCALE x SETTING type => 'date'
+SCALE color TO viridis
+FACET region SETTING scales => 'free_y'
+LABEL title => 'Sales Trends by Region',
+      x => 'Month',
+      y => 'Total Quantity',
+      caption => 'Data from 2024'
+
+-- ============================================================================
+-- Example 3: Bar Chart with Projection
+-- ============================================================================
+SELECT category, SUM(value) as total
+FROM products
+WHERE year = 2024
+GROUP BY category
+ORDER BY total DESC
+LIMIT 10
+VISUALISE category AS x, total AS y, category AS fill
+DRAW bar
+PROJECT y, x TO cartesian
+LABEL title => 'Top 10 Product Categories',
+      x => 'Category',
+      y => 'Total Sales'
+
+-- ============================================================================
+-- Example 4: Polar Projection (Pie Chart)
+-- ============================================================================
+SELECT region, COUNT(*) as count
+FROM customers
+GROUP BY region
+VISUALISE region AS x, count AS y, region AS fill
+DRAW bar
+PROJECT TO polar
+LABEL title => 'Customer Distribution by Region'
+
+-- ============================================================================
+-- Example 5: Faceted Histogram
+-- ============================================================================
+SELECT age, gender, income
+FROM demographics
+WHERE age BETWEEN 18 AND 80
+VISUALISE age AS x, gender AS fill
+DRAW histogram
+SCALE x SETTING type => 'linear', limits => (18, 80)
+FACET gender SETTING scales => 'fixed'
+LABEL title => 'Age Distribution by Gender',
+      x => 'Age',
+      y => 'Count'
+
+-- ============================================================================
+-- Example 6: Time Series with Custom Scale
+-- Uses layer-specific mappings when aesthetics differ between layers
+-- ============================================================================
+WITH daily_metrics AS (
+    SELECT
+        timestamp::DATE as date,
+        AVG(temperature) as avg_temp,
+        MAX(temperature) as max_temp,
+        MIN(temperature) as min_temp
+    FROM sensor_data
+    WHERE timestamp >= NOW() - INTERVAL '30 days'
+    GROUP BY timestamp::DATE
+)
+SELECT * FROM daily_metrics
+VISUALISE date AS x
+DRAW ribbon
+    MAPPING min_temp AS ymin, max_temp AS ymax
+    SETTING opacity => 0.3, fill => 'lightblue'
+DRAW line
+    MAPPING avg_temp AS y
+    SETTING size => 2, color => 'blue'
+SCALE x SETTING type => 'date'
+SCALE x FROM ('2024-01-01', '2024-12-31')
+SCALE y SETTING type => 'linear', limits => (0, 100)
+LABEL title => 'Temperature Range (Last 30 Days)',
+      x => 'Date',
+      y => 'Temperature (°C)',
+      caption => 'Source: Weather Station Alpha'
+
+-- ============================================================================
+-- Example 7: Complex Join with Multiple Aesthetics
+-- ============================================================================
+SELECT
+    p.product_name,
+    p.category,
+    s.sale_date,
+    s.quantity,
+    s.revenue,
+    e.employee_name
+FROM products p
+JOIN sales s ON p.product_id = s.product_id
+JOIN employees e ON s.employee_id = e.employee_id
+WHERE s.sale_date >= '2024-01-01'
+VISUALISE sale_date AS x, revenue AS y, category AS color, quantity AS size, category AS shape
+DRAW point
+SCALE x SETTING type => 'date'
+SCALE y SETTING type => 'log10'
+SCALE DISCRETE color FROM ('Electronics', 'Clothing', 'Food', 'Books')
+FACET category BY employee_name SETTING scales => 'free_y'
+LABEL title => 'Sales Performance Analysis',
+      x => 'Sale Date',
+      y => 'Revenue (log scale)',
+      color => 'Product Category',
+      size => 'Quantity Sold'
+
+-- ============================================================================
+-- Example 8: Area Chart with Stacking
+-- ============================================================================
+WITH quarterly_breakdown AS (
+    SELECT
+        DATE_TRUNC('quarter', sale_date) as quarter,
+        category,
+        SUM(revenue) as revenue
+    FROM sales
+    WHERE sale_date >= '2023-01-01'
+    GROUP BY DATE_TRUNC('quarter', sale_date), category
+)
+VISUALISE quarter AS x, revenue AS y, category AS fill FROM quarterly_breakdown
+DRAW area SETTING opacity => 0.7
+SCALE x SETTING type => 'date'
+SCALE DISCRETE fill FROM ('A', 'B', 'C', 'D') TO plasma
+LABEL title => 'Quarterly Revenue by Category',
+      x => 'Quarter',
+      y => 'Revenue ($)',
+      subtitle => 'Stacked Area Chart'
+
+-- ============================================================================
+-- Example 9: Boxplot with Violin Overlay
+-- ============================================================================
+SELECT category, price, rating
+FROM products
+WHERE rating IS NOT NULL
+VISUALISE category AS x, price AS y
+DRAW boxplot
+DRAW violin SETTING opacity => 0.3
+SCALE y FROM (0, 500)
+LABEL title => 'Price Distribution by Category',
+      x => 'Product Category',
+      y => 'Price ($)'
+
+-- ============================================================================
+-- Example 10: Annotated Scatter Plot
+-- Uses layer-specific mappings for different aesthetics per layer
+-- ============================================================================
+SELECT
+    product_name,
+    price,
+    rating,
+    sales_count
+FROM products
+WHERE featured = TRUE
+VISUALISE price AS x, rating AS y
+DRAW point
+    MAPPING sales_count AS size, sales_count AS color
+DRAW text
+    MAPPING product_name AS label
+SCALE color TO viridis
+SCALE size SETTING limits => (0, 10000)
+SCALE x FROM (0, 1000)
+SCALE y FROM (0, 5)
+LABEL title => 'Featured Products: Price vs Rating',
+      x => 'Price ($)',
+      y => 'Customer Rating',
+      size => 'Total Sales'
+
+-- ============================================================================
+-- Example 11: Multiple VISUALISE Statements
+-- ============================================================================
+WITH sales_summary AS (
+    SELECT region, category, SUM(revenue) as total
+    FROM sales
+    GROUP BY region, category
+)
+-- First visualization: by region
+VISUALISE region AS x, total AS y, region AS fill FROM sales_summary
+DRAW bar
+LABEL title => 'Sales by Region'
+-- Second visualization: by category
+VISUALISE category AS x, total AS y, category AS fill FROM sales_summary
+DRAW bar
+PROJECT y, x TO cartesian
+LABEL title => 'Sales by Category'
+
+-- ============================================================================
+-- Example 12: FILTER clause for layer-specific filtering
+-- ============================================================================
+SELECT date, value, category
+FROM metrics
+VISUALISE date AS x, value AS y, category AS color
+DRAW line
+DRAW point FILTER value > 50
+SCALE x SETTING type => 'date'
+LABEL title => 'Metrics with Highlighted Points Above 50'
+
+-- ============================================================================
+-- Comments and String Handling
+-- ============================================================================
+/*
+   Multi-line block comment
+   Testing comment syntax highlighting
+   across multiple lines
+*/
+
+SELECT
+    'VISUALISE' as text,  -- String containing ggsql keywords
+    "This is a string" as quoted,
+    123 as number,
+    45.67 as decimal,
+    -99.9 as negative,
+    NULL as null_value,
+    TRUE as bool_true,
+    FALSE as bool_false
+FROM test_data
+VISUALISE *

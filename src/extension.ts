@@ -1,0 +1,101 @@
+/*
+ * ggsql VS Code Extension
+ *
+ * Provides syntax highlighting for ggsql and, when running in Positron,
+ * a language runtime that wraps the ggsql-jupyter kernel.
+ */
+
+import * as vscode from 'vscode';
+import { tryAcquirePositronApi } from '@posit-dev/positron';
+import { GgsqlRuntimeManager } from './manager';
+import { createConnectionDrivers } from './connections';
+import { GgsqlCodeLensProvider, registerCellCommands } from './codelens';
+import { activateDecorations } from './decorations';
+import { activateContextKeys } from './context';
+import { parseCells } from './cellParser';
+
+// Output channel for logging
+const outputChannel = vscode.window.createOutputChannel('ggsql');
+
+export function log(message: string): void {
+    outputChannel.appendLine(`[${new Date().toISOString()}] ${message}`);
+}
+
+/**
+ * Activates the extension.
+ *
+ * @param context The extension context
+ */
+export function activate(context: vscode.ExtensionContext): void {
+    log('ggsql extension activating...');
+
+    // Try to acquire the Positron API
+    const positronApi = tryAcquirePositronApi();
+
+    if (!positronApi) {
+        // Running in VS Code (not Positron) - syntax highlighting still works
+        // but we don't register the language runtime
+        log('Positron API not available - running in VS Code mode');
+        return;
+    }
+
+    log('Positron API acquired - registering runtime manager');
+
+    // Running in Positron - register the ggsql runtime manager
+    const manager = new GgsqlRuntimeManager(context);
+    const disposable = positronApi.runtime.registerLanguageRuntimeManager('ggsql', manager);
+    context.subscriptions.push(disposable);
+
+    log('ggsql runtime manager registered successfully');
+
+    // Register connection drivers for the Connections pane
+    const drivers = createConnectionDrivers(positronApi);
+    for (const driver of drivers) {
+        const driverDisposable = positronApi.connections.registerConnectionDriver(driver);
+        context.subscriptions.push(driverDisposable);
+    }
+
+    log(`Registered ${drivers.length} connection drivers`);
+
+    // Register "Source Current File" command for the editor run button
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ggsql.sourceCurrentFile', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || editor.document.languageId !== 'ggsql') {
+                return;
+            }
+            const cells = parseCells(editor.document);
+            if (cells.length > 0) {
+                for (const cell of cells) {
+                    if (cell.text.length > 0) {
+                        positronApi.runtime.executeCode('ggsql', cell.text, false, true);
+                    }
+                }
+            } else {
+                const code = editor.document.getText();
+                if (code.trim().length === 0) {
+                    return;
+                }
+                positronApi.runtime.executeCode('ggsql', code, true);
+            }
+        })
+    );
+
+    // Register code lens provider and cell commands
+    context.subscriptions.push(
+        vscode.languages.registerCodeLensProvider('ggsql', new GgsqlCodeLensProvider()),
+    );
+    registerCellCommands(context, (code) => {
+        positronApi.runtime.executeCode('ggsql', code, false, true);
+    });
+
+    activateDecorations(context.subscriptions);
+    activateContextKeys(context.subscriptions);
+}
+
+/**
+ * Deactivates the extension.
+ */
+export function deactivate(): void {
+    // Nothing to clean up
+}
