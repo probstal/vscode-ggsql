@@ -53,10 +53,39 @@ async function render(specs: TopLevelSpec[]): Promise<void> {
     }
 }
 
+/**
+ * Export every rendered chart via the vega View API: raw SVG markup for
+ * 'svg', a base64 data URL (rendered through a canvas) for 'png'.
+ */
+async function exportCharts(format: 'svg' | 'png', id: number): Promise<void> {
+    try {
+        const images: string[] = [];
+        for (const view of views) {
+            images.push(
+                format === 'svg' ? await view.toSVG() : await view.toImageURL('png', 2)
+            );
+        }
+        vscode.postMessage({ type: 'exportResult', id, images });
+    } catch (e) {
+        vscode.postMessage({
+            type: 'exportResult',
+            id,
+            error: e instanceof Error ? e.message : String(e),
+        });
+    }
+}
+
 window.addEventListener('message', (event: MessageEvent) => {
-    const message = event.data as { type: string; specs?: TopLevelSpec[] };
+    const message = event.data as {
+        type: string;
+        specs?: TopLevelSpec[];
+        format?: 'svg' | 'png';
+        id?: number;
+    };
     if (message.type === 'render' && message.specs) {
         void render(message.specs);
+    } else if (message.type === 'export' && message.format && message.id !== undefined) {
+        void exportCharts(message.format, message.id);
     }
 });
 

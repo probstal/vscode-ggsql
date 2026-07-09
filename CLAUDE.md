@@ -51,6 +51,9 @@ Declared in `package.json` and wired up in `extension.ts`:
 | `ggsql.runCellsAbove` | — | Run all cells above the cursor |
 | `ggsql.sourceCurrentFile` | — | Run the entire file (also exposed as the editor "Run" button) |
 | `ggsql.renderDbtFile` | — | Render a VISUALISE clause in a dbt-project sql/jinja-sql file |
+| `ggsql.saveChartAsSvg` | — | Save the rendered chart(s) as SVG via a save dialog |
+| `ggsql.saveChartAsPng` | — | Save the rendered chart(s) as PNG via a save dialog |
+| `ggsql.saveChartAsJson` | — | Save the Vega-Lite spec(s) as JSON via a save dialog |
 
 Cells are detected by `cellParser.ts` (separator: lines starting with `-- %%`); `codelens.ts` puts a CodeLens above each cell.
 
@@ -64,6 +67,8 @@ Every run command flows through `runner.ts`:
 4. `src/webview/main.ts` (bundled separately to `out/webview.js`, browser platform) compiles each spec with `vega-lite` and renders SVG with `vega`.
 
 Running the whole file or "Run Cells Above" executes cells sequentially and renders all resulting charts in the panel.
+
+The save commands (`ggsql.saveChartAsSvg`/`ggsql.saveChartAsPng`/`ggsql.saveChartAsJson`) live in the results panel tab's `...` overflow menu (`editor/title` menu gated on `activeWebviewPanelId == ggsqlResults`). For SVG/PNG, `panel.ts` posts an `export` request to the webview, which answers with `view.toSVG()` markup or a `view.toImageURL('png', 2)` data URL per chart (both built into vega — no extra dependency); JSON is served directly from the specs the panel already holds (pretty-printed, saved as `<name>.vl.json`). The save dialog defaults to the source document's name (extensions stripped, `chartBaseName()` in `extension.ts`) in the last-used save directory (remembered in memory for the window's lifetime, falling back to the workspace folder); with multiple charts the extra ones get `-2`, `-3`, ... name suffixes.
 
 ## dbt integration
 

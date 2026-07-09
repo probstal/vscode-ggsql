@@ -17,6 +17,15 @@ import { GgsqlResultPanel } from './panel';
 import { log, outputChannel } from './logging';
 
 /**
+ * Default file name (without extension) for saving charts produced by a
+ * document: the file name with its ggsql/sql extensions stripped.
+ */
+function chartBaseName(document: vscode.TextDocument): string {
+    const base = path.basename(document.uri.path);
+    return base.replace(/(\.(ggsql|gsql|sql))+$/i, '') || 'chart';
+}
+
+/**
  * Run one or more ggsql queries against the active document's working
  * directory and show the resulting visualizations in the results panel.
  */
@@ -50,7 +59,7 @@ async function executeQueries(
                 }
             }
             if (specs.length > 0) {
-                GgsqlResultPanel.show(extensionUri, specs);
+                GgsqlResultPanel.show(extensionUri, specs, chartBaseName(document));
             }
         }
     );
@@ -108,7 +117,7 @@ async function runDbtVisualisation(
                 if (result.stderr) {
                     log(result.stderr);
                 }
-                GgsqlResultPanel.show(context.extensionUri, result.specs);
+                GgsqlResultPanel.show(context.extensionUri, result.specs, chartBaseName(document));
             } catch (e) {
                 const message = e instanceof GgsqlError ? e.message : String(e);
                 log(`dbt visualization failed: ${message}`);
@@ -165,6 +174,20 @@ export function activate(context: vscode.ExtensionContext): void {
             }
             void runDbtVisualisation(context, editor.document);
         })
+    );
+
+    // Save the rendered charts to disk (shown in the results panel's
+    // editor-title overflow menu).
+    context.subscriptions.push(
+        vscode.commands.registerCommand('ggsql.saveChartAsSvg', () =>
+            GgsqlResultPanel.saveCharts('svg')
+        ),
+        vscode.commands.registerCommand('ggsql.saveChartAsPng', () =>
+            GgsqlResultPanel.saveCharts('png')
+        ),
+        vscode.commands.registerCommand('ggsql.saveChartAsJson', () =>
+            GgsqlResultPanel.saveCharts('json')
+        ),
     );
 
     // Register code lens provider and cell commands
