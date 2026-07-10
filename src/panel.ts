@@ -33,13 +33,13 @@ export class GgsqlResultPanel {
         reject: (error: Error) => void;
     }>();
 
-    static show(extensionUri: vscode.Uri, specs: object[], baseName?: string): void {
+    static show(extensionUri: vscode.Uri, specs: object[], baseName?: string, fileName?: string): void {
         if (GgsqlResultPanel.current) {
-            GgsqlResultPanel.current.render(specs, baseName);
+            GgsqlResultPanel.current.render(specs, baseName, fileName);
             GgsqlResultPanel.current.panel.reveal(undefined, true);
             return;
         }
-        GgsqlResultPanel.current = new GgsqlResultPanel(extensionUri, specs, baseName);
+        GgsqlResultPanel.current = new GgsqlResultPanel(extensionUri, specs, baseName, fileName);
     }
 
     /**
@@ -105,6 +105,32 @@ export class GgsqlResultPanel {
         );
     }
 
+    /**
+     * Show or hide the loading overlay over the currently displayed charts.
+     * A no-op when no panel is open (there is nothing to overlay; the
+     * window progress indicator covers that case).
+     */
+    static setLoading(loading: boolean): void {
+        const current = GgsqlResultPanel.current;
+        if (current?.ready) {
+            void current.panel.webview.postMessage({ type: 'loading', loading });
+        }
+    }
+
+    /**
+     * Replace the loading spinner with the error message on the overlay
+     * (which stays up until the next run). Returns false when no panel is
+     * open to display it, so the caller can fall back to a notification.
+     */
+    static showError(message: string): boolean {
+        const current = GgsqlResultPanel.current;
+        if (!current?.ready) {
+            return false;
+        }
+        void current.panel.webview.postMessage({ type: 'error', message });
+        return true;
+    }
+
     /** Ask the webview to export all charts and await its response. */
     private requestExport(format: ExportFormat): Promise<string[]> {
         const id = ++this.exportSeq;
@@ -119,14 +145,14 @@ export class GgsqlResultPanel {
         });
     }
 
-    private constructor(extensionUri: vscode.Uri, specs: object[], baseName?: string) {
+    private constructor(extensionUri: vscode.Uri, specs: object[], baseName?: string, fileName?: string) {
         this.pendingSpecs = specs;
         this.specs = specs;
         this.baseName = baseName ?? 'chart';
 
         this.panel = vscode.window.createWebviewPanel(
             'ggsqlResults',
-            'ggsql Results',
+            panelTitle(fileName),
             { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
             {
                 enableScripts: true,
@@ -157,10 +183,11 @@ export class GgsqlResultPanel {
         this.panel.webview.html = getHtml(this.panel.webview, scriptUri);
     }
 
-    private render(specs: object[], baseName?: string): void {
+    private render(specs: object[], baseName?: string, fileName?: string): void {
         this.pendingSpecs = specs;
         this.specs = specs;
         this.baseName = baseName ?? 'chart';
+        this.panel.title = panelTitle(fileName);
         this.flush();
     }
 
@@ -195,6 +222,11 @@ export class GgsqlResultPanel {
         }
         this.disposables = [];
     }
+}
+
+/** Tab title: the source file the charts came from. */
+function panelTitle(fileName?: string): string {
+    return fileName ? `Chart ${fileName}` : 'ggsql Results';
 }
 
 /** chart.svg → chart-2.svg for saving additional charts alongside. */
@@ -267,10 +299,54 @@ function getHtml(webview: vscode.Webview, scriptUri: vscode.Uri): string {
             font-family: var(--vscode-editor-font-family);
             background: transparent;
         }
+        /* Shown over the previous charts while a new query is running; on
+           failure the spinner gives way to the error text (.error). */
+        #overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+        #overlay.visible {
+            display: flex;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top-color: var(--vscode-progressBar-background, #0e70c0);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        #overlay.error .spinner {
+            display: none;
+        }
+        #overlay-error {
+            display: none;
+            /* Fixed red: theme error colors lack contrast on the dark scrim. */
+            color: #ff6b6b;
+            font-family: var(--vscode-editor-font-family, monospace);
+            white-space: pre-wrap;
+            overflow-wrap: break-word;
+            padding: 24px;
+            max-width: 85%;
+            max-height: 85%;
+            overflow: auto;
+        }
+        #overlay.error #overlay-error {
+            display: block;
+        }
     </style>
 </head>
 <body>
     <div id="charts"></div>
+    <div id="overlay"><div class="spinner"></div><div id="overlay-error"></div></div>
     <script src="${scriptUri}"></script>
 </body>
 </html>`;

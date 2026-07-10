@@ -63,10 +63,14 @@ Every run command flows through `runner.ts`:
 
 1. Spawns `ggsql exec --reader <reader> <query>` (executable from the `ggsql.executablePath` setting, falling back to `ggsql` on `PATH`). The working directory is the document's folder so relative paths like `FROM 'data.csv'` resolve.
 2. The CLI writes a Vega-Lite spec (JSON) to stdout on success; errors go to stderr with a non-zero exit and surface as an error notification plus the `ggsql` output channel.
-3. `panel.ts` opens/reuses a singleton "ggsql Results" webview beside the editor and posts the specs to it.
+3. `panel.ts` opens/reuses a singleton webview beside the editor (tab title `Chart <filename>` of the source document) and posts the specs to it.
 4. `src/webview/main.ts` (bundled separately to `out/webview.js`, browser platform) compiles each spec with `vega-lite` and renders SVG with `vega`.
 
+Runs are cancelable and exclusive: each run shows a cancellable `ProgressLocation.Notification`, wired via an `AbortController` to the child process (`signal` option on `execFile` in `runner.ts`/`dbt.ts`; aborting rejects with `QueryCancelledError`). Starting a new run aborts the previous one (`startRun()`/`activeRun` in `extension.ts`), so only one query is ever in flight. Cancellation is silent — the loading overlay is cleared (unless a newer run owns it) and no error is shown.
+
 Running the whole file or "Run Cells Above" executes cells sequentially and renders all resulting charts in the panel.
+
+While a query runs, the previous charts stay visible under a dark loading overlay with a CSS spinner: both run paths call `GgsqlResultPanel.setLoading(true)` before running (a no-op if no panel is open yet), which posts a `loading` message to the webview. On success, rendering the new specs clears the overlay; on failure, `reportQueryError()` (extension.ts) calls `GgsqlResultPanel.showError()`, which keeps the overlay up but swaps the spinner for the red error text (Vue-HMR style) until the next run. If no panel is open to show it, the error falls back to the notification + output channel.
 
 The save commands (`ggsql.saveChartAsSvg`/`ggsql.saveChartAsPng`/`ggsql.saveChartAsJson`) live in the results panel tab's `...` overflow menu (`editor/title` menu gated on `activeWebviewPanelId == ggsqlResults`). For SVG/PNG, `panel.ts` posts an `export` request to the webview, which answers with `view.toSVG()` markup or a `view.toImageURL('png', 2)` data URL per chart (both built into vega — no extra dependency); JSON is served directly from the specs the panel already holds (pretty-printed, saved as `<name>.vl.json`). The save dialog defaults to the source document's name (extensions stripped, `chartBaseName()` in `extension.ts`) in the last-used save directory (remembered in memory for the window's lifetime, falling back to the workspace folder); with multiple charts the extra ones get `-2`, `-3`, ... name suffixes.
 

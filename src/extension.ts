@@ -11,7 +11,7 @@ import { GgsqlCodeLensProvider, registerCellCommands } from './codelens';
 import { activateDecorations } from './decorations';
 import { activateContextKeys } from './context';
 import { parseCells } from './cellParser';
-import { runQuery, workingDirFor, GgsqlError } from './runner';
+import { runQuery, workingDirFor, GgsqlError, QueryCancelledError } from './runner';
 import { findDbtProjectRoot, planDbtQuery, runDbtShow, writeRowsCache } from './dbt';
 import { GgsqlResultPanel } from './panel';
 import { log, outputChannel } from './logging';
@@ -26,6 +26,19 @@ function chartBaseName(document: vscode.TextDocument): string {
 }
 
 /**
+ * The one in-flight run. Starting a new run aborts the previous one, so
+ * there is only ever a single active query.
+ */
+let activeRun: AbortController | undefined;
+
+function startRun(): AbortController {
+    activeRun?.abort();
+    const controller = new AbortController();
+    activeRun = controller;
+    return controller;
+}
+
+/**
  * Run one or more ggsql queries against the active document's working
  * directory and show the resulting visualizations in the results panel.
  */
@@ -35,34 +48,67 @@ async function executeQueries(
     queries: string[],
 ): Promise<void> {
     const cwd = workingDirFor(document);
+    const controller = startRun();
 
-    await vscode.window.withProgress(
-        {
-            location: vscode.ProgressLocation.Window,
-            title: 'Running ggsql query...',
-        },
-        async () => {
-            const specs: object[] = [];
-            for (const query of queries) {
-                try {
-                    const result = await runQuery(query, cwd);
+    GgsqlResultPanel.setLoading(true);
+    try {
+        await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: 'Running ggsql query...',
+                cancellable: true,
+            },
+            async (_progress, token) => {
+                token.onCancellationRequested(() => controller.abort());
+                const specs: object[] = [];
+                for (const query of queries) {
+                    const result = await runQuery(query, { cwd, signal: controller.signal });
                     specs.push(...result.specs);
                     if (result.stderr) {
                         log(result.stderr);
                     }
-                } catch (e) {
-                    const message = e instanceof GgsqlError ? e.message : String(e);
-                    log(`Query failed: ${message}`);
-                    outputChannel.show(true);
-                    void vscode.window.showErrorMessage(`ggsql: ${message}`);
+                }
+                if (controller.signal.aborted) {
                     return;
                 }
+                if (specs.length > 0) {
+                    // Rendering the new charts clears the loading overlay.
+                    GgsqlResultPanel.show(
+                        extensionUri, specs, chartBaseName(document), path.basename(document.uri.path)
+                    );
+                } else {
+                    GgsqlResultPanel.setLoading(false);
+                }
             }
-            if (specs.length > 0) {
-                GgsqlResultPanel.show(extensionUri, specs, chartBaseName(document));
-            }
+        );
+    } catch (e) {
+        handleRunFailure(e, controller);
+    } finally {
+        if (activeRun === controller) {
+            activeRun = undefined;
         }
-    );
+    }
+}
+
+/**
+ * Surface a failed run. Cancellation is silent: the loading overlay is
+ * cleared (the old charts come back) unless a newer run has already taken
+ * over the overlay. Real errors go to the results panel's overlay if one
+ * is open (spinner becomes the error message), otherwise a notification.
+ */
+function handleRunFailure(e: unknown, controller: AbortController): void {
+    if (e instanceof QueryCancelledError || controller.signal.aborted) {
+        if (activeRun === controller) {
+            GgsqlResultPanel.setLoading(false);
+        }
+        return;
+    }
+    const message = e instanceof GgsqlError ? e.message : String(e);
+    log(`Query failed: ${message}`);
+    if (!GgsqlResultPanel.showError(message)) {
+        outputChannel.show(true);
+        void vscode.window.showErrorMessage(`ggsql: ${message}`);
+    }
 }
 
 /**
@@ -97,14 +143,19 @@ async function runDbtVisualisation(
         return;
     }
 
-    await vscode.window.withProgress(
-        {
-            location: vscode.ProgressLocation.Window,
-            title: 'Running dbt query...',
-        },
-        async () => {
-            try {
-                const rows = await runDbtShow(plan.dbtSql, projectRoot);
+    const controller = startRun();
+
+    GgsqlResultPanel.setLoading(true);
+    try {
+        await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: 'Running dbt query...',
+                cancellable: true,
+            },
+            async (_progress, token) => {
+                token.onCancellationRequested(() => controller.abort());
+                const rows = await runDbtShow(plan.dbtSql, projectRoot, controller.signal);
                 if (rows.length === 0) {
                     throw new GgsqlError('The dbt query returned no rows.');
                 }
@@ -113,19 +164,29 @@ async function runDbtVisualisation(
                 const query = plan.buildRenderQuery(cachePath);
                 // The data already sits in the local cache file, so ignore
                 // any custom ggsql.reader and read it with in-memory duckdb.
-                const result = await runQuery(query, projectRoot, 'duckdb://memory');
+                const result = await runQuery(query, {
+                    cwd: projectRoot,
+                    reader: 'duckdb://memory',
+                    signal: controller.signal,
+                });
                 if (result.stderr) {
                     log(result.stderr);
                 }
-                GgsqlResultPanel.show(context.extensionUri, result.specs, chartBaseName(document));
-            } catch (e) {
-                const message = e instanceof GgsqlError ? e.message : String(e);
-                log(`dbt visualization failed: ${message}`);
-                outputChannel.show(true);
-                void vscode.window.showErrorMessage(`ggsql: ${message}`);
+                if (controller.signal.aborted) {
+                    return;
+                }
+                GgsqlResultPanel.show(
+                    context.extensionUri, result.specs, chartBaseName(document), path.basename(document.uri.path)
+                );
             }
+        );
+    } catch (e) {
+        handleRunFailure(e, controller);
+    } finally {
+        if (activeRun === controller) {
+            activeRun = undefined;
         }
-    );
+    }
 }
 
 /**

@@ -20,6 +20,19 @@ export interface RunResult {
 
 export class GgsqlError extends Error {}
 
+/** The run was aborted (user cancel or superseded by a newer run). */
+export class QueryCancelledError extends Error {}
+
+export interface RunOptions {
+    /** Working directory for the CLI (so relative file paths like
+     *  FROM 'data.csv' resolve next to the document) */
+    cwd?: string;
+    /** Reader to use instead of the `ggsql.reader` setting */
+    reader?: string;
+    /** Kills the CLI process when aborted */
+    signal?: AbortSignal;
+}
+
 function getConfig(): { executable: string; reader: string } {
     const config = vscode.workspace.getConfiguration('ggsql');
     const executable = config.get<string>('executablePath', '').trim() || 'ggsql';
@@ -71,28 +84,29 @@ export function parseJsonDocuments(text: string): object[] {
 
 /**
  * Execute a ggsql query via the CLI and return the resulting Vega-Lite specs.
- *
- * @param query The ggsql source to execute
- * @param cwd Working directory for the CLI (so relative file paths like
- *            FROM 'data.csv' resolve next to the document)
- * @param readerOverride Reader to use instead of the `ggsql.reader` setting
+ * Rejects with QueryCancelledError when options.signal aborts the run.
  */
-export function runQuery(query: string, cwd?: string, readerOverride?: string): Promise<RunResult> {
+export function runQuery(query: string, options: RunOptions = {}): Promise<RunResult> {
     const { executable, reader: configuredReader } = getConfig();
-    const reader = readerOverride ?? configuredReader;
-    log(`Running ggsql exec --reader ${reader} (cwd: ${cwd ?? process.cwd()})`);
+    const reader = options.reader ?? configuredReader;
+    log(`Running ggsql exec --reader ${reader} (cwd: ${options.cwd ?? process.cwd()})`);
 
     return new Promise((resolve, reject) => {
         cp.execFile(
             executable,
             ['exec', '--reader', reader, query],
             {
-                cwd,
+                cwd: options.cwd,
                 maxBuffer: 256 * 1024 * 1024,
                 timeout: 5 * 60 * 1000,
+                signal: options.signal,
             },
             (error, stdout, stderr) => {
                 if (error) {
+                    if (options.signal?.aborted) {
+                        reject(new QueryCancelledError('The query was cancelled.'));
+                        return;
+                    }
                     const errnoError = error as NodeJS.ErrnoException;
                     if (errnoError.code === 'ENOENT') {
                         reject(new GgsqlError(

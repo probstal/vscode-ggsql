@@ -11,7 +11,7 @@ import * as cp from 'child_process';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { GgsqlError, parseJsonDocuments } from './runner';
+import { GgsqlError, QueryCancelledError, parseJsonDocuments } from './runner';
 import { log } from './logging';
 
 export interface SplitQuery {
@@ -255,7 +255,7 @@ function stripAnsi(text: string): string {
  * with the project root as working directory, so refs, macros, and the
  * project's profile/target all resolve exactly like a normal dbt run.
  */
-export function runDbtShow(sql: string, projectRoot: string): Promise<object[]> {
+export function runDbtShow(sql: string, projectRoot: string, signal?: AbortSignal): Promise<object[]> {
     const executable = getDbtPath();
     log(`Running ${executable} show --inline ${sql} (project: ${projectRoot})`);
 
@@ -267,9 +267,14 @@ export function runDbtShow(sql: string, projectRoot: string): Promise<object[]> 
                 cwd: projectRoot,
                 maxBuffer: 256 * 1024 * 1024,
                 timeout: 10 * 60 * 1000,
+                signal,
             },
             (error, stdout, stderr) => {
                 if (error) {
+                    if (signal?.aborted) {
+                        reject(new QueryCancelledError('The query was cancelled.'));
+                        return;
+                    }
                     const errnoError = error as NodeJS.ErrnoException;
                     if (errnoError.code === 'ENOENT') {
                         reject(new GgsqlError(

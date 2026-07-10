@@ -15,7 +15,28 @@ const vscode = acquireVsCodeApi();
 
 let views: vega.View[] = [];
 
+function setLoading(loading: boolean): void {
+    const overlay = document.getElementById('overlay');
+    if (!overlay) {
+        return;
+    }
+    overlay.classList.remove('error');
+    overlay.classList.toggle('visible', loading);
+}
+
+/** Keep the overlay up but swap the spinner for the error message. */
+function showError(message: string): void {
+    const overlay = document.getElementById('overlay');
+    const error = document.getElementById('overlay-error');
+    if (!overlay || !error) {
+        return;
+    }
+    error.textContent = message;
+    overlay.classList.add('visible', 'error');
+}
+
 async function render(specs: TopLevelSpec[]): Promise<void> {
+    setLoading(false);
     const container = document.getElementById('charts');
     if (!container) {
         return;
@@ -81,11 +102,17 @@ window.addEventListener('message', (event: MessageEvent) => {
         specs?: TopLevelSpec[];
         format?: 'svg' | 'png';
         id?: number;
+        loading?: boolean;
+        message?: string;
     };
     if (message.type === 'render' && message.specs) {
         void render(message.specs);
     } else if (message.type === 'export' && message.format && message.id !== undefined) {
         void exportCharts(message.format, message.id);
+    } else if (message.type === 'loading') {
+        setLoading(message.loading === true);
+    } else if (message.type === 'error' && message.message !== undefined) {
+        showError(message.message);
     }
 });
 
