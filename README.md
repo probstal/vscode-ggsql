@@ -1,4 +1,4 @@
-# ggsql for VSCode
+# ggsql for VS Code 
 
 [ggsql](https://ggsql.org) is a SQL extension for declarative data visualization based on Grammar of Graphics principles. It combines SQL data queries with visualization specifications in a single, composable syntax.
 
@@ -78,11 +78,11 @@ The extension is available on the [VS Code Marketplace](https://marketplace.visu
 
 You can download the extension from the GitHub releases and install it manually:
 
-1. Download `vscode-ggsql-0.2.0.vsix` from [Releases](https://github.com/probstal/vscode-ggsql/releases)
+1. Download `vscode-ggsql-0.3.0.vsix` from [Releases](https://github.com/probstal/vscode-ggsql/releases)
 2. Install via the command line:
 
 ```bash
-code --install-extension vscode-ggsql-0.2.0.vsix
+code --install-extension vscode-ggsql-0.3.0.vsix
 ```
 
 Or install from within the editor: open the Extensions view, click the `...` menu, select "Install from VSIX...", and choose the downloaded file.

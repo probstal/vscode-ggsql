@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- Chart export: save rendered charts as SVG, PNG, or the Vega-Lite spec as JSON
+  via the results panel's `...` menu.
+- Loading spinner: while a query runs, the previous charts stay visible under a
+  loading overlay; on failure the error is shown in the panel instead of a
+  notification.
+- Query cancellation: runs show a cancellable progress notification, and
+  starting a new run aborts the previous one, so only one query is ever in
+  flight.
+
 ## 0.2.1
 
 - Updated the README with VS Code Marketplace install instructions
