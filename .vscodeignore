@@ -2,6 +2,7 @@
 .vscode-test/**
 .claude/**
 CLAUDE.md
+docs/**
 eslint.config.mjs
 .gitignore
 .yarnrc
