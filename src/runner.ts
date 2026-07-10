@@ -9,7 +9,11 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as path from 'path';
-import { log } from './logging';
+import { GgsqlError, QueryCancelledError } from './errors';
+import { runStandalone } from './standalone';
+import { formatMs, log, logRaw, nextRunNumber, oneLine, timestamp } from './logging';
+
+export { GgsqlError, QueryCancelledError } from './errors';
 
 export interface RunResult {
     /** Vega-Lite specs produced by the query (usually one) */
@@ -18,19 +22,21 @@ export interface RunResult {
     stderr: string;
 }
 
-export class GgsqlError extends Error {}
-
-/** The run was aborted (user cancel or superseded by a newer run). */
-export class QueryCancelledError extends Error {}
-
 export interface RunOptions {
-    /** Working directory for the CLI (so relative file paths like
-     *  FROM 'data.csv' resolve next to the document) */
+    /** Working directory (so relative file paths like FROM 'data.csv'
+     *  resolve next to the document) */
     cwd?: string;
-    /** Reader to use instead of the `ggsql.reader` setting */
+    /** Reader to use instead of the `ggsql.reader` setting (cli engine) */
     reader?: string;
-    /** Kills the CLI process when aborted */
+    /** Cancels the run when aborted */
     signal?: AbortSignal;
+}
+
+export type Engine = 'standalone' | 'cli';
+
+export function getEngine(): Engine {
+    const config = vscode.workspace.getConfiguration('ggsql');
+    return config.get<string>('engine', 'standalone') === 'cli' ? 'cli' : 'standalone';
 }
 
 function getConfig(): { executable: string; reader: string } {
@@ -83,13 +89,26 @@ export function parseJsonDocuments(text: string): object[] {
 }
 
 /**
- * Execute a ggsql query via the CLI and return the resulting Vega-Lite specs.
- * Rejects with QueryCancelledError when options.signal aborts the run.
+ * Execute a ggsql query and return the resulting Vega-Lite specs, either
+ * via the ggsql CLI or the bundled wasm engine, per the `ggsql.engine`
+ * setting. Rejects with QueryCancelledError when options.signal aborts.
  */
 export function runQuery(query: string, options: RunOptions = {}): Promise<RunResult> {
+    if (getEngine() === 'standalone') {
+        return runStandalone(query, options);
+    }
     const { executable, reader: configuredReader } = getConfig();
     const reader = options.reader ?? configuredReader;
-    log(`Running ggsql exec --reader ${reader} (cwd: ${options.cwd ?? process.cwd()})`);
+    const runNumber = nextRunNumber();
+    const startedAt = Date.now();
+    log(`run #${runNumber} · cli · started (${executable} exec --reader ${reader})`);
+
+    const logCliRun = (outcome: string, result: string) => {
+        logRaw(
+            `[${timestamp()}] run #${runNumber} · cli · ${outcome} · ${formatMs(Date.now() - startedAt)} · cwd: ${options.cwd ?? process.cwd()}\n` +
+            `└─ ggsql-cli ▸ ${oneLine(query)}  → ${result}`
+        );
+    };
 
     return new Promise((resolve, reject) => {
         cp.execFile(
@@ -104,17 +123,20 @@ export function runQuery(query: string, options: RunOptions = {}): Promise<RunRe
             (error, stdout, stderr) => {
                 if (error) {
                     if (options.signal?.aborted) {
+                        logCliRun('cancelled', '✕ cancelled');
                         reject(new QueryCancelledError('The query was cancelled.'));
                         return;
                     }
                     const errnoError = error as NodeJS.ErrnoException;
                     if (errnoError.code === 'ENOENT') {
+                        logCliRun('failed', `✕ '${executable}' not found`);
                         reject(new GgsqlError(
                             `Could not find '${executable}'. Install the ggsql CLI or set "ggsql.executablePath" in settings.`
                         ));
                         return;
                     }
                     const message = stderr.trim() || error.message;
+                    logCliRun('failed', `✕ ${oneLine(message, 120)}`);
                     reject(new GgsqlError(message));
                     return;
                 }
@@ -122,13 +144,16 @@ export function runQuery(query: string, options: RunOptions = {}): Promise<RunRe
                 try {
                     const specs = parseJsonDocuments(stdout);
                     if (specs.length === 0) {
+                        logCliRun('failed', '✕ no visualization output');
                         reject(new GgsqlError(
                             stderr.trim() || 'ggsql produced no visualization output.'
                         ));
                         return;
                     }
+                    logCliRun('ok', `${specs.length} spec${specs.length === 1 ? '' : 's'}`);
                     resolve({ specs, stderr: stderr.trim() });
                 } catch (e) {
+                    logCliRun('failed', '✕ unparseable output');
                     reject(new GgsqlError(`Failed to parse ggsql output as JSON: ${e}`));
                 }
             }

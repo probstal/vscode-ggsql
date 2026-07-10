@@ -179,15 +179,28 @@
       "type": "object",
       "title": "ggsql",
       "properties": {
+        "ggsql.engine": {
+          "type": "string",
+          "enum": [
+            "standalone",
+            "cli"
+          ],
+          "enumDescriptions": [
+            "Bundled WebAssembly engines — works out of the box, no installation. SQL runs on DuckDB (full file support: CSV, JSON, Parquet, globs), the VISUALISE clause is rendered by ggsql.",
+            "The ggsql CLI (see ggsql.executablePath) — required for custom readers (ggsql.reader) such as persistent DuckDB databases or ODBC sources."
+          ],
+          "default": "standalone",
+          "description": "How queries are executed."
+        },
         "ggsql.reader": {
           "type": "string",
           "default": "duckdb://memory",
-          "description": "Data source connection string passed to the ggsql CLI via --reader (e.g. duckdb://memory, duckdb://path/to.db, sqlite://path/to.db, odbc://...)."
+          "description": "Data source connection string passed to the ggsql CLI via --reader (e.g. duckdb://memory, duckdb://path/to.db, sqlite://path/to.db, odbc://...). Only used with the 'cli' engine — the standalone engine always runs in-memory."
         },
         "ggsql.executablePath": {
           "type": "string",
           "default": "",
-          "description": "Path to the ggsql executable. If empty, uses 'ggsql' from PATH."
+          "description": "Path to the ggsql executable ('cli' engine). If empty, uses 'ggsql' from PATH."
         },
         "ggsql.dbtPath": {
           "type": "string",
@@ -222,5 +235,9 @@
   },
   "overrides": {
     "uri-js": "npm:uri-js-replace"
+  },
+  "dependencies": {
+    "@duckdb/duckdb-wasm": "^1.33.1-dev57.0",
+    "ggsql-wasm": "^0.4.1"
   }
 }

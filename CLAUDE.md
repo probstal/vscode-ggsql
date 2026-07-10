@@ -16,12 +16,16 @@ ggsql-vscode/
 ├── logo.png, icon.png
 ├── src/
 │   ├── extension.ts          activate(): registers commands, code lenses, decorations
-│   ├── runner.ts             Executes queries via `ggsql exec --reader <reader> <query>`
-│   ├── dbt.ts                dbt integration: VISUALISE split, `dbt show` runner, row cache
+│   ├── runner.ts             Query execution: engine dispatch + `ggsql exec` CLI path
+│   ├── standalone.ts         Standalone engine: worker client, cancellation, run-tree logs
+│   ├── wasmWorker.ts         Worker thread: duckdb-wasm (SQL) + ggsql-wasm (VISUALISE)
+│   ├── querySplit.ts         VISUALISE/statement splitting (no vscode imports)
+│   ├── errors.ts             GgsqlError/QueryCancelledError (no vscode imports)
+│   ├── dbt.ts                dbt integration: `dbt show` runner, row cache
 │   ├── panel.ts              Webview results panel (singleton, opens beside the editor)
 │   ├── webview/
 │   │   └── main.ts           Webview script: compiles specs with vega-lite, renders with vega
-│   ├── logging.ts            Shared output channel
+│   ├── logging.ts            Output channel + run-tree formatting helpers
 │   ├── cellParser.ts         Splits .ggsql files into cells for Run-Cell commands
 │   ├── codelens.ts           "▶ Run Query" lens above each cell
 │   ├── decorations.ts        Cell separator decorations
@@ -59,14 +63,27 @@ Cells are detected by `cellParser.ts` (separator: lines starting with `-- %%`); 
 
 ## Query execution and rendering
 
-Every run command flows through `runner.ts`:
+Every run command flows through `runner.ts` (`runQuery()`), which dispatches on the `ggsql.engine` setting:
 
-1. Spawns `ggsql exec --reader <reader> <query>` (executable from the `ggsql.executablePath` setting, falling back to `ggsql` on `PATH`). The working directory is the document's folder so relative paths like `FROM 'data.csv'` resolve.
-2. The CLI writes a Vega-Lite spec (JSON) to stdout on success; errors go to stderr with a non-zero exit and surface as an error notification plus the `ggsql` output channel.
-3. `panel.ts` opens/reuses a singleton webview beside the editor (tab title `Chart <filename>` of the source document) and posts the specs to it.
-4. `src/webview/main.ts` (bundled separately to `out/webview.js`, browser platform) compiles each spec with `vega-lite` and renders SVG with `vega`.
+- **standalone** (default): `standalone.ts` sends the query to a `worker_threads` worker (`wasmWorker.ts` → `out/wasmWorker.js`) hosting two wasm engines, both binaries copied to `out/` by esbuild.js: **duckdb-wasm** (`@duckdb/duckdb-wasm/blocking`, `duckdb-eh.wasm`) executes the SQL, **ggsql-wasm** (`ggsql_wasm_bg.wasm`) renders the VISUALISE clause. Per statement (split at top-level semicolons, `splitStatements()` in querySplit.ts) the worker mirrors the dbt pattern: `planSplitQuery()` splits at VISUALISE, the SQL part runs on duckdb via `COPY (sql) TO '<tmp>.parquet'`, the parquet is registered with ggsql as table `duckdb_result`, and the rewritten VISUALISE query produces the spec. Statements without a VISUALISE run plain on duckdb (side effects persist in its catalog across runs until cancel/reload). duckdb-wasm's NODE_FS runtime reads files referenced in queries (CSV/JSON/Parquet/globs) directly from disk — full DuckDB file support; a runtime wrapper (`makeRuntime()`) resolves relative paths against the document folder, since the wasm has no cwd (all file requests funnel through the `glob`/`checkFile` runtime hooks). Special routes: statements with `FROM ggsql:dataset` (builtins only exist in the ggsql context, resolved *unquoted*; registered best-effort at startup, may need network) go wholly to ggsql-wasm, as do statements where our scanner and ggsql's `has_visual()` disagree (parser wins, avoiding seam mis-splits); the reverse disagreement runs as plain SQL on duckdb. Errors are stage-tagged (`DuckDB: ...` / `ggsql: ...`). Both engines execute synchronously — the worker keeps the extension host responsive and makes cancellation possible (`worker.terminate()`, fresh worker + fresh engine state on the next run). The stale bridge parquet is deleted before each COPY (duckdb opens without truncating; a cancel mid-COPY would otherwise corrupt the next run's footer). The `ggsql.reader` setting is ignored.
+- **cli**: spawns `ggsql exec --reader <reader> <query>` (executable from `ggsql.executablePath`, falling back to `ggsql` on `PATH`; reader from `ggsql.reader`). The working directory is the document's folder so relative paths like `FROM 'data.csv'` resolve. The CLI writes Vega-Lite spec(s) to stdout; errors go to stderr with a non-zero exit.
 
-Runs are cancelable and exclusive: each run shows a cancellable `ProgressLocation.Notification`, wired via an `AbortController` to the child process (`signal` option on `execFile` in `runner.ts`/`dbt.ts`; aborting rejects with `QueryCancelledError`). Starting a new run aborts the previous one (`startRun()`/`activeRun` in `extension.ts`), so only one query is ever in flight. Cancellation is silent — the loading overlay is cleared (unless a newer run owns it) and no error is shown.
+Every run writes an explain-style tree to the `ggsql` output channel (helpers in logging.ts: `timestamp()`, `oneLine()`, `formatMs()`, shared `nextRunNumber()`), showing per step which engine ran what, row/spec counts, and durations:
+
+```
+[12:03:12.345] run #3 · standalone · ok · 45ms · cwd: /Users/x/proj
+├─ statement 1/2
+│  ├─ duckdb ▸ SELECT city, temp FROM 'weather.csv'  → 365 rows · 12ms
+│  └─ ggsql ▸ SELECT * FROM 'duckdb_result' VISUALISE …  → 1 spec · 4ms
+└─ statement 2/2
+   └─ duckdb ▸ CREATE TABLE t AS …  → 0 rows · 3ms
+```
+
+The trace is produced in the worker (`TraceStep`/`StatementTrace` in wasmWorker.ts) and formatted by `formatTrace()` in standalone.ts; CLI runs log an equivalent single-step tree from runner.ts; the dbt path logs its `dbt show` step (rows + duration) before handing off to the renderer run.
+
+Then `panel.ts` opens/reuses a singleton webview beside the editor (tab title `Chart <filename>` of the source document) and posts the specs to it; `src/webview/main.ts` (bundled separately to `out/webview.js`, browser platform) compiles each spec with `vega-lite` and renders SVG with `vega`.
+
+Runs are cancelable and exclusive: each run shows a cancellable `ProgressLocation.Notification`, wired via an `AbortController` to the child process (`signal` option on `execFile` in `runner.ts`/`dbt.ts`) or the wasm worker (terminated on abort); aborting rejects with `QueryCancelledError`. Starting a new run aborts the previous one (`startRun()`/`activeRun` in `extension.ts`), so only one query is ever in flight. Cancellation is silent — the loading overlay is cleared (unless a newer run owns it) and no error is shown.
 
 Running the whole file or "Run Cells Above" executes cells sequentially and renders all resulting charts in the panel.
 
@@ -78,12 +95,11 @@ The save commands (`ggsql.saveChartAsSvg`/`ggsql.saveChartAsPng`/`ggsql.saveChar
 
 `dbt.ts` adds a second execution path for `sql`/`jinja-sql` documents inside a dbt project. `context.ts` sets the `ggsql.isDbtVisualiseFile` context key (language is sql/jinja-sql + document contains a top-level `VISUALISE`/`VISUALIZE` + a `dbt_project.yml` exists upward from the file), which shows the "Render ggsql Visualization" run button (`ggsql.renderDbtFile`). The command:
 
-1. `planDbtQuery()` splits the document at the top-level VISUALISE keyword (`splitVisualise()`, a scanner that skips SQL strings/comments, Jinja blocks, and parenthesized subqueries) and decides the shape of the run:
+1. `planSplitQuery()` (querySplit.ts, shared with the standalone engine) splits the document at the top-level VISUALISE keyword (`splitVisualise()`, a scanner that skips SQL strings/comments, Jinja blocks, dollar-quoted strings, and parenthesized subqueries) and decides the shape of the run:
    - *Pattern A* — the SQL part has a top-level SELECT: it goes to dbt as-is, and the render query prepends `SELECT * FROM '<cache>.json'` to the VISUALISE part.
    - *Pattern B* — no top-level SELECT (e.g. the query jumps from the last CTE straight to `VISUALISE ... FROM cte`, or there is no SQL part at all): `select * from <source>` is appended for dbt, where `<source>` is the VISUALISE clause's own FROM; for rendering, that FROM is repointed at the cache file. If neither a top-level SELECT nor a VISUALISE FROM exists, the command errors.
 2. `runDbtShow()` runs `dbt --quiet show --inline <sql> --output json --limit -1` with the dbt project root as cwd (executable from `ggsql.dbtPath`, falling back to `dbt` on PATH). dbt compiles the Jinja and executes against the project's target; rows come back as `{"show": [...]}` on stdout.
-3. `writeRowsCache()` writes the rows to a content-hash-named JSON file under the extension's global storage.
-4. The render query from step 1 goes through the normal `runner.ts`/`panel.ts` path, always with reader `duckdb://memory` (the `ggsql.reader` setting is ignored on this path — the data already sits in the local cache file).
+3. `writeRowsCache()` writes the rows to a content-hash-named JSON file under the extension's global storage, and the render query goes through the normal `runner.ts`/`panel.ts` path with reader `duckdb://memory` — both engines read the JSON cache themselves (duckdb-wasm directly in standalone mode, the CLI via its in-memory duckdb; a custom `ggsql.reader` is deliberately ignored here).
 
 Jinja inside the VISUALISE part is not compiled (only the SQL part goes through dbt). A test dbt project lives at `dbt-proj/` (not shipped; excluded via `.vscodeignore`) with the dbt executable at `dbt-proj/.venv/bin/dbt`.
 
@@ -91,8 +107,9 @@ Jinja inside the VISUALISE part is not compiled (only the SQL part goes through 
 
 ```json
 {
-  "ggsql.reader": "string",          // --reader connection string, default "duckdb://memory"
-  "ggsql.executablePath": "string",  // empty → use 'ggsql' from PATH
+  "ggsql.engine": "standalone|cli",  // default "standalone" (bundled wasm engine)
+  "ggsql.reader": "string",          // --reader connection string, default "duckdb://memory"; cli engine only
+  "ggsql.executablePath": "string",  // empty → use 'ggsql' from PATH; cli engine only
   "ggsql.dbtPath": "string"          // empty → use 'dbt' from PATH
 }
 ```
@@ -103,7 +120,7 @@ Jinja inside the VISUALISE part is not compiled (only the SQL part goes through 
 cd ggsql-vscode
 npm install                # one-time
 npm run check-types        # tsc --noEmit
-npm run package            # esbuild → out/extension.js + out/webview.js (production)
+npm run package            # esbuild → out/{extension,webview,wasmWorker}.js + wasm binaries (production)
 npx vsce package           # produces ggsql-<version>.vsix
 code --install-extension ggsql-<version>.vsix
 ```

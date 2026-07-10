@@ -12,9 +12,11 @@ import { activateDecorations } from './decorations';
 import { activateContextKeys } from './context';
 import { parseCells } from './cellParser';
 import { runQuery, workingDirFor, GgsqlError, QueryCancelledError } from './runner';
-import { findDbtProjectRoot, planDbtQuery, runDbtShow, writeRowsCache } from './dbt';
+import { planSplitQuery } from './querySplit';
+import { findDbtProjectRoot, runDbtShow, writeRowsCache } from './dbt';
+import { disposeStandalone } from './standalone';
 import { GgsqlResultPanel } from './panel';
-import { log, outputChannel } from './logging';
+import { formatMs, log, logRaw, oneLine, outputChannel, timestamp } from './logging';
 
 /**
  * Default file name (without extension) for saving charts produced by a
@@ -127,7 +129,7 @@ async function runDbtVisualisation(
     }
     let plan;
     try {
-        plan = planDbtQuery(document.getText());
+        plan = planSplitQuery(document.getText());
     } catch (e) {
         const message = e instanceof GgsqlError ? e.message : String(e);
         void vscode.window.showErrorMessage(`ggsql: ${message}`);
@@ -155,15 +157,21 @@ async function runDbtVisualisation(
             },
             async (_progress, token) => {
                 token.onCancellationRequested(() => controller.abort());
-                const rows = await runDbtShow(plan.dbtSql, projectRoot, controller.signal);
+                const dbtStartedAt = Date.now();
+                const rows = await runDbtShow(plan.sql, projectRoot, controller.signal);
+                logRaw(
+                    `[${timestamp()}] dbt · ${path.basename(document.uri.fsPath)} · project: ${projectRoot}\n` +
+                    `└─ dbt ▸ dbt show --inline ${oneLine(plan.sql)}  → ${rows.length} rows · ${formatMs(Date.now() - dbtStartedAt)} · handing off to renderer ↓`
+                );
                 if (rows.length === 0) {
                     throw new GgsqlError('The dbt query returned no rows.');
                 }
                 const cachePath = await writeRowsCache(rows, context.globalStorageUri);
-                log(`Cached ${rows.length} rows to ${cachePath}`);
                 const query = plan.buildRenderQuery(cachePath);
-                // The data already sits in the local cache file, so ignore
-                // any custom ggsql.reader and read it with in-memory duckdb.
+                // The rows sit in the local JSON cache file, which both
+                // engines read themselves: duckdb-wasm directly (standalone),
+                // the CLI via in-memory duckdb (any custom ggsql.reader is
+                // deliberately ignored on this path).
                 const result = await runQuery(query, {
                     cwd: projectRoot,
                     reader: 'duckdb://memory',
@@ -267,5 +275,5 @@ export function activate(context: vscode.ExtensionContext): void {
  * Deactivates the extension.
  */
 export function deactivate(): void {
-    // Nothing to clean up
+    disposeStandalone();
 }

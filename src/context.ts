@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { parseCells } from './cellParser';
-import { findDbtProjectRoot, splitVisualise } from './dbt';
+import { findDbtProjectRoot } from './dbt';
+import { splitVisualise } from './querySplit';
 
 function setHasCodeCells(editor: vscode.TextEditor | undefined): void {
 	let value = false;
