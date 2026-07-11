@@ -1,0 +1,4 @@
+repo: https://github.com/posit-dev/ggsql
+ref: v0.4.1
+commit: 6fcb07fd7ba40039c61b839c9979e0cad3bceea5
+source: src/data/

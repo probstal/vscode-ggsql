@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
-# Sync the vendored tree-sitter-ggsql grammar from posit-dev/ggsql and
-# rebuild the wasm parser used by the standalone/dbt query split
-# (src/treeSplit.ts).
+# Sync the vendored upstream pieces from posit-dev/ggsql: the
+# tree-sitter-ggsql grammar (rebuilt to wasm, used by the standalone/dbt
+# query split in src/treeSplit.ts) and the builtin datasets
+# (ggsql:penguins & co., served to duckdb by the standalone engine).
 #
-# Usage: scripts/update-grammar.sh [ref]
+# Usage: scripts/update-vendor.sh [ref]
 #
 # `ref` is the upstream tag/branch to pin — keep it matching the
 # ggsql-wasm version in package.json so the grammar the extension splits
@@ -23,12 +24,26 @@ VENDOR="$ROOT/vendor/tree-sitter-ggsql"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo "Fetching $REPO @ $REF (sparse: tree-sitter-ggsql/) ..."
+echo "Fetching $REPO @ $REF (sparse: tree-sitter-ggsql/, src/data/) ..."
 git clone --quiet --depth 1 --branch "$REF" --filter=blob:none --sparse "$REPO" "$TMP/ggsql"
-git -C "$TMP/ggsql" sparse-checkout set --no-cone /tree-sitter-ggsql >/dev/null
+git -C "$TMP/ggsql" sparse-checkout set --no-cone /tree-sitter-ggsql /src/data >/dev/null
 
 SRC="$TMP/ggsql/tree-sitter-ggsql"
 [ -f "$SRC/grammar.js" ] || { echo "error: no tree-sitter-ggsql/grammar.js at $REF" >&2; exit 1; }
+
+DATA="$TMP/ggsql/src/data"
+DATASETS="$ROOT/vendor/ggsql-datasets"
+[ -d "$DATA" ] || { echo "error: no src/data at $REF" >&2; exit 1; }
+rm -rf "$DATASETS"
+mkdir -p "$DATASETS"
+cp "$DATA"/*.parquet "$DATASETS/"
+cat > "$DATASETS/UPSTREAM" <<EOF
+repo: $REPO
+ref: $REF
+commit: $(git -C "$TMP/ggsql" rev-parse HEAD)
+source: src/data/
+EOF
+echo "Datasets: $(ls "$DATASETS" | grep -c '\.parquet$') parquet files → $DATASETS"
 
 rm -rf "$VENDOR"
 mkdir -p "$VENDOR"

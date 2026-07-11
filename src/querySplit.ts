@@ -201,6 +201,43 @@ export function quotePath(path: string): string {
 }
 
 /**
+ * Replace unquoted `ggsql:<name>` builtin-dataset references (outside
+ * strings, quoted identifiers, comments, and Jinja) with the file path
+ * `resolve(name)` returns, quoted as a SQL string. References resolve()
+ * doesn't know stay untouched and are reported in `unresolved`.
+ */
+export function rewriteDatasetRefs(
+    text: string,
+    resolve: (name: string) => string | undefined,
+): { text: string; rewritten: string[]; unresolved: string[] } {
+    const replacements: { start: number; end: number; path: string }[] = [];
+    const rewritten: string[] = [];
+    const unresolved: string[] = [];
+    scanCode(text, i => {
+        if ((text[i] === 'g' || text[i] === 'G') && isWordStart(text, i)) {
+            const match = /^ggsql:([A-Za-z_]\w*)/i.exec(text.slice(i, i + 64));
+            if (match) {
+                const resolved = resolve(match[1]);
+                if (resolved === undefined) {
+                    unresolved.push(match[1]);
+                } else {
+                    replacements.push({ start: i, end: i + match[0].length, path: resolved });
+                    rewritten.push(match[1]);
+                }
+                return i + match[0].length;
+            }
+        }
+    });
+    let result = '';
+    let cursor = 0;
+    for (const r of replacements) {
+        result += text.slice(cursor, r.start) + quotePath(r.path);
+        cursor = r.end;
+    }
+    return { text: result + text.slice(cursor), rewritten, unresolved };
+}
+
+/**
  * Plan how to run a split query: what SQL to send to the data engine and
  * how to rewrite the VISUALISE part against the engine's result.
  *

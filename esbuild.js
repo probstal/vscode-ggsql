@@ -19,6 +19,13 @@ async function main() {
     // splitter (src/treeSplit.ts) in both the extension host and worker.
     fs.copyFileSync('node_modules/web-tree-sitter/web-tree-sitter.wasm', 'out/web-tree-sitter.wasm');
     fs.copyFileSync('vendor/tree-sitter-ggsql/tree-sitter-ggsql.wasm', 'out/tree-sitter-ggsql.wasm');
+    // Builtin ggsql: datasets, served to duckdb by the worker.
+    fs.mkdirSync('out/datasets', { recursive: true });
+    for (const file of fs.readdirSync('vendor/ggsql-datasets')) {
+        if (file.endsWith('.parquet')) {
+            fs.copyFileSync(`vendor/ggsql-datasets/${file}`, `out/datasets/${file}`);
+        }
+    }
     // Extension host bundle (Node)
     const extensionCtx = await esbuild.context({
         entryPoints: ['src/extension.ts'],

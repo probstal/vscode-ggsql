@@ -26,7 +26,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { initSync, GgsqlContext } from 'ggsql-wasm';
 import * as duckdb from '@duckdb/duckdb-wasm/blocking';
-import { splitStatements } from './querySplit';
+import { rewriteDatasetRefs, splitStatements } from './querySplit';
 import { initTreeSplit, planSplit } from './treeSplit';
 import { GgsqlError } from './errors';
 
@@ -190,6 +190,37 @@ function stepError(
     return new GgsqlError(`${step.engine === 'duckdb' ? 'DuckDB' : 'ggsql'}: ${message}`);
 }
 
+/**
+ * Bundled copy of a builtin dataset (vendor/ggsql-datasets, copied to
+ * out/datasets by esbuild.js), so `ggsql:name` references can run on
+ * duckdb like any other data.
+ */
+function resolveDataset(name: string): string | undefined {
+    const file = path.join(__dirname, 'datasets', `${name}.parquet`);
+    return fs.existsSync(file) ? file : undefined;
+}
+
+/** Trace note when bundled datasets were substituted for duckdb. */
+function datasetNote(rewritten: string[]): string | undefined {
+    if (rewritten.length === 0) {
+        return undefined;
+    }
+    return `${rewritten.map(n => `ggsql:${n}`).join(', ')} → bundled parquet`;
+}
+
+/** Trace note for a statement routed to ggsql over unbundled datasets. */
+function unbundledDatasetNote(unresolved: string[]): string {
+    const base = `ggsql: dataset '${unresolved[0]}' not bundled, skipping duckdb`;
+    return ggsqlBuiltinsError
+        ? `${base}; builtin registration failed: ${ggsqlBuiltinsError}`
+        : base;
+}
+
+function joinNotes(...parts: Array<string | undefined>): string | undefined {
+    const joined = parts.filter(Boolean).join('; ');
+    return joined || undefined;
+}
+
 /** Run a whole statement through ggsql-wasm (no duckdb involved). */
 function runOnGgsqlDirect(statement: string, steps: TraceStep[], note: string): string {
     const context = getGgsql();
@@ -210,15 +241,6 @@ async function runStatement(statement: string, steps: TraceStep[]): Promise<stri
     const context = getGgsql();
     await ggsqlBuiltins;
 
-    // Builtin datasets only exist inside the ggsql context (note: the
-    // engine resolves them unquoted, FROM ggsql:penguins).
-    if (/\bfrom\s+["']?ggsql:/i.test(statement)) {
-        const note = ggsqlBuiltinsError
-            ? `ggsql: dataset, skipping duckdb; builtin registration failed: ${ggsqlBuiltinsError}`
-            : 'ggsql: dataset, skipping duckdb';
-        return [runOnGgsqlDirect(statement, steps, note)];
-    }
-
     const { plan, fallback } = planSplit(statement);
     const splitNote = fallback && `split via scanner: ${fallback}`;
 
@@ -229,34 +251,57 @@ async function runStatement(statement: string, steps: TraceStep[]): Promise<stri
             return [runOnGgsqlDirect(statement, steps, 'fallback: splitter missed VISUALISE')];
         }
         // Plain SQL (CREATE TABLE, INSERT, bare SELECT, ...) — side
-        // effects live in the duckdb catalog for later statements.
+        // effects live in the duckdb catalog for later statements. Bundled
+        // ggsql: datasets are served to duckdb as parquet files; unbundled
+        // ones only exist inside the ggsql context (resolved unquoted).
+        const rw = rewriteDatasetRefs(statement, resolveDataset);
+        if (rw.unresolved.length > 0) {
+            return [runOnGgsqlDirect(statement, steps, unbundledDatasetNote(rw.unresolved))];
+        }
+        const note = joinNotes(splitNote, datasetNote(rw.rewritten));
         const { connection } = await getDuckdb();
         const startedAt = Date.now();
         try {
-            const table = connection.query(statement);
-            steps.push({ engine: 'duckdb', query: statement, ms: Date.now() - startedAt, rows: table.numRows, note: splitNote });
+            const table = connection.query(rw.text);
+            steps.push({ engine: 'duckdb', query: rw.text, ms: Date.now() - startedAt, rows: table.numRows, note });
             return [];
         } catch (e) {
-            throw stepError(steps, { engine: 'duckdb', query: statement, note: splitNote }, startedAt, e);
+            throw stepError(steps, { engine: 'duckdb', query: rw.text, note }, startedAt, e);
         }
     }
 
     if (!context.has_visual(statement)) {
-        // Scanner found VISUALISE but the parser disagrees (e.g. inside an
-        // unusual construct) — treat as plain SQL.
+        // Our splitter found VISUALISE but the parser disagrees (e.g.
+        // inside an unusual construct) — treat as plain SQL.
+        const rw = rewriteDatasetRefs(statement, resolveDataset);
+        if (rw.unresolved.length > 0) {
+            return [runOnGgsqlDirect(statement, steps, unbundledDatasetNote(rw.unresolved))];
+        }
+        const note = joinNotes(
+            'ggsql parser sees no VISUALISE, running as plain SQL',
+            datasetNote(rw.rewritten),
+        );
         const { connection } = await getDuckdb();
         const startedAt = Date.now();
-        const note = 'ggsql parser sees no VISUALISE, running as plain SQL';
         try {
-            const table = connection.query(statement);
-            steps.push({ engine: 'duckdb', query: statement, ms: Date.now() - startedAt, rows: table.numRows, note });
+            const table = connection.query(rw.text);
+            steps.push({ engine: 'duckdb', query: rw.text, ms: Date.now() - startedAt, rows: table.numRows, note });
             return [];
         } catch (e) {
-            throw stepError(steps, { engine: 'duckdb', query: statement, note }, startedAt, e);
+            throw stepError(steps, { engine: 'duckdb', query: rw.text, note }, startedAt, e);
         }
     }
 
     // Split pipeline: SQL on duckdb → parquet hand-off → ggsql renders.
+    // Bundled ggsql: datasets in the SQL part are rewritten to parquet
+    // paths for duckdb (references inside the VISUALISE part, e.g. layer
+    // sources, stay with ggsql, which resolves builtins itself).
+    const rw = rewriteDatasetRefs(plan.sql, resolveDataset);
+    if (rw.unresolved.length > 0) {
+        return [runOnGgsqlDirect(statement, steps, unbundledDatasetNote(rw.unresolved))];
+    }
+    const sqlForDuck = rw.text;
+    const duckNote = joinNotes(splitNote, datasetNote(rw.rewritten));
     const { connection } = await getDuckdb();
     const bridgeFile = path.join(os.tmpdir(), `ggsql-bridge-${process.pid}-${threadId}.parquet`);
     let rows = 0;
@@ -267,12 +312,12 @@ async function runStatement(statement: string, steps: TraceStep[]): Promise<stri
         // duckdb opens without truncating, which would corrupt the footer.
         fs.rmSync(bridgeFile, { force: true });
         const copyResult = connection.query(
-            `COPY (${plan.sql}) TO '${bridgeFile.replace(/'/g, "''")}' (FORMAT parquet)`
+            `COPY (${sqlForDuck}) TO '${bridgeFile.replace(/'/g, "''")}' (FORMAT parquet)`
         );
         rows = Number(copyResult.toArray()[0]?.Count ?? 0);
-        steps.push({ engine: 'duckdb', query: plan.sql, ms: Date.now() - sqlStartedAt, rows, note: splitNote });
+        steps.push({ engine: 'duckdb', query: sqlForDuck, ms: Date.now() - sqlStartedAt, rows, note: duckNote });
     } catch (e) {
-        throw stepError(steps, { engine: 'duckdb', query: plan.sql, note: splitNote }, sqlStartedAt, e);
+        throw stepError(steps, { engine: 'duckdb', query: sqlForDuck, note: duckNote }, sqlStartedAt, e);
     }
 
     const renderQuery = plan.buildRenderQuery(BRIDGE_TABLE);
