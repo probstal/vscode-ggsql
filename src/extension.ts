@@ -12,7 +12,7 @@ import { activateDecorations } from './decorations';
 import { activateContextKeys } from './context';
 import { parseCells } from './cellParser';
 import { runQuery, workingDirFor, GgsqlError, QueryCancelledError } from './runner';
-import { planSplitQuery } from './querySplit';
+import { initTreeSplit, planSplit } from './treeSplit';
 import { findDbtProjectRoot, runDbtShow, writeRowsCache } from './dbt';
 import { disposeStandalone } from './standalone';
 import { GgsqlResultPanel } from './panel';
@@ -129,7 +129,12 @@ async function runDbtVisualisation(
     }
     let plan;
     try {
-        plan = planSplitQuery(document.getText());
+        await initTreeSplit(__dirname);
+        const split = planSplit(document.getText());
+        if (split.fallback) {
+            log(`dbt split: falling back to scanner (${split.fallback})`);
+        }
+        plan = split.plan;
     } catch (e) {
         const message = e instanceof GgsqlError ? e.message : String(e);
         void vscode.window.showErrorMessage(`ggsql: ${message}`);
@@ -204,6 +209,10 @@ async function runDbtVisualisation(
  */
 export function activate(context: vscode.ExtensionContext): void {
     log('ggsql extension activating...');
+
+    // Warm up the tree-sitter split grammar (used by the dbt path; the
+    // standalone worker loads its own copy).
+    void initTreeSplit(__dirname);
 
     const execute = (queries: string[]) => {
         const editor = vscode.window.activeTextEditor;

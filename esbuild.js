@@ -4,11 +4,21 @@ const fs = require('fs');
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 
+// web-tree-sitter's ESM build breaks in a CJS bundle (its
+// createRequire(import.meta.url) sees undefined), so bundle the CJS build.
+const treeSitterAlias = {
+    'web-tree-sitter': './node_modules/web-tree-sitter/web-tree-sitter.cjs',
+};
+
 async function main() {
     // The wasm engine binaries are loaded at runtime by the worker bundle.
     fs.mkdirSync('out', { recursive: true });
     fs.copyFileSync('node_modules/ggsql-wasm/ggsql_wasm_bg.wasm', 'out/ggsql_wasm_bg.wasm');
     fs.copyFileSync('node_modules/@duckdb/duckdb-wasm/dist/duckdb-eh.wasm', 'out/duckdb-eh.wasm');
+    // tree-sitter runtime + vendored ggsql grammar, used by the query
+    // splitter (src/treeSplit.ts) in both the extension host and worker.
+    fs.copyFileSync('node_modules/web-tree-sitter/web-tree-sitter.wasm', 'out/web-tree-sitter.wasm');
+    fs.copyFileSync('vendor/tree-sitter-ggsql/tree-sitter-ggsql.wasm', 'out/tree-sitter-ggsql.wasm');
     // Extension host bundle (Node)
     const extensionCtx = await esbuild.context({
         entryPoints: ['src/extension.ts'],
@@ -20,6 +30,7 @@ async function main() {
         platform: 'node',
         outfile: 'out/extension.js',
         external: ['vscode'],
+        alias: treeSitterAlias,
         logLevel: 'info',
     });
 
@@ -46,6 +57,7 @@ async function main() {
         sourcesContent: false,
         platform: 'node',
         outfile: 'out/wasmWorker.js',
+        alias: treeSitterAlias,
         logLevel: 'info',
     });
 

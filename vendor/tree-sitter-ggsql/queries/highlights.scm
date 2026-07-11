@@ -1,0 +1,131 @@
+; Tree-sitter highlighting queries for ggsql
+
+; Note: Keywords are case-insensitive via regex patterns in grammar.js,
+; so we can't match them directly in highlight queries. Instead, we rely
+; on structural matching (e.g., visualise_statement node type) for semantic
+; highlighting.
+
+; Geom types
+[
+  "point"
+  "line"
+  "path"
+  "bar"
+  "area"
+  "tile"
+  "polygon"
+  "ribbon"
+  "histogram"
+  "density"
+  "smooth"
+  "boxplot"
+  "violin"
+  "text"
+  "label"
+  "segment"
+  "arrow"
+  "rule"
+  "range"
+  "spatial"
+] @type.builtin
+
+; Aesthetic names
+[
+  ; Position aesthetics (cartesian)
+  "x"
+  "y"
+  "xmin"
+  "xmax"
+  "ymin"
+  "ymax"
+  "xend"
+  "yend"
+  ; Position aesthetics (polar)
+  "angle"
+  "radius"
+  "anglemin"
+  "anglemax"
+  "radiusmin"
+  "radiusmax"
+  "angleend"
+  "radiusend"
+  ; Aggregation aesthetic
+  "weight"
+  ; Color aesthetics
+  "color"
+  "colour"
+  "fill"
+  "stroke"
+  "opacity"
+  ; Size and shape
+  "size"
+  "shape"
+  "linetype"
+  "linewidth"
+  "width"
+  "height"
+  ; Text aesthetics
+  "label"
+  "typeface"
+  "fontweight"
+  "italic"
+  "fontsize"
+  "hjust"
+  "vjust"
+  "rotation"
+  ; Specialty aesthetics
+  "slope"
+  "geometry"
+  ; Facet aesthetics
+  "panel"
+  "row"
+  "column"
+  ; Computed variables
+  "offset"
+  "density"
+  "count"
+  "intensity"
+] @attribute
+
+; String literals
+(string) @string
+
+; Numbers
+(number) @number
+
+; Booleans
+(boolean) @constant.builtin
+
+; Comments
+(comment) @comment
+
+; Identifiers (column references)
+(column_reference) @variable
+
+; Scale type identifiers (CONTINUOUS, DISCRETE, BINNED, ORDINAL, IDENTITY)
+(scale_type_identifier) @type.builtin
+
+; Property names
+(project_property_name) @property
+(label_type) @property
+
+; Operators
+"=" @operator
+"!=" @operator
+"<>" @operator
+"<" @operator
+">" @operator
+"<=" @operator
+">=" @operator
+"~" @operator
+"~*" @operator
+"!~" @operator
+"!~*" @operator
+"::" @operator
+"||" @operator
+
+; Punctuation
+["," "[" "]" "(" ")"] @punctuation.delimiter
+
+; Parameter names (in SETTING clause)
+(parameter_name) @variable.parameter

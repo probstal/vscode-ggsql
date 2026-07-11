@@ -19,7 +19,8 @@ ggsql-vscode/
 │   ├── runner.ts             Query execution: engine dispatch + `ggsql exec` CLI path
 │   ├── standalone.ts         Standalone engine: worker client, cancellation, run-tree logs
 │   ├── wasmWorker.ts         Worker thread: duckdb-wasm (SQL) + ggsql-wasm (VISUALISE)
-│   ├── querySplit.ts         VISUALISE/statement splitting (no vscode imports)
+│   ├── querySplit.ts         Scanner-based VISUALISE/statement splitting (no vscode imports)
+│   ├── treeSplit.ts          Grammar-based VISUALISE splitting via tree-sitter (no vscode imports)
 │   ├── errors.ts             GgsqlError/QueryCancelledError (no vscode imports)
 │   ├── dbt.ts                dbt integration: `dbt show` runner, row cache
 │   ├── panel.ts              Webview results panel (singleton, opens beside the editor)
@@ -34,7 +35,11 @@ ggsql-vscode/
 │   ├── ggsql.tmLanguage.json TextMate grammar (used for tokenization in VS Code)
 │   └── ggsql.injection.tmLanguage.json  Injection grammar for sql/jinja-sql files
 ├── examples/                 Sample .ggsql files
-└── resources/                Static assets bundled with the extension
+├── resources/                Static assets bundled with the extension
+├── scripts/
+│   └── update-grammar.sh     Re-vendor the tree-sitter grammar + rebuild its wasm
+└── vendor/
+    └── tree-sitter-ggsql/    Vendored ggsql grammar, pinned to the ggsql-wasm version
 ```
 
 ## File extensions and language ID
@@ -65,8 +70,12 @@ Cells are detected by `cellParser.ts` (separator: lines starting with `-- %%`); 
 
 Every run command flows through `runner.ts` (`runQuery()`), which dispatches on the `ggsql.engine` setting:
 
-- **standalone** (default): `standalone.ts` sends the query to a `worker_threads` worker (`wasmWorker.ts` → `out/wasmWorker.js`) hosting two wasm engines, both binaries copied to `out/` by esbuild.js: **duckdb-wasm** (`@duckdb/duckdb-wasm/blocking`, `duckdb-eh.wasm`) executes the SQL, **ggsql-wasm** (`ggsql_wasm_bg.wasm`) renders the VISUALISE clause. Per statement (split at top-level semicolons, `splitStatements()` in querySplit.ts) the worker mirrors the dbt pattern: `planSplitQuery()` splits at VISUALISE, the SQL part runs on duckdb via `COPY (sql) TO '<tmp>.parquet'`, the parquet is registered with ggsql as table `duckdb_result`, and the rewritten VISUALISE query produces the spec. Statements without a VISUALISE run plain on duckdb (side effects persist in its catalog across runs until cancel/reload). duckdb-wasm's NODE_FS runtime reads files referenced in queries (CSV/JSON/Parquet/globs) directly from disk — full DuckDB file support; a runtime wrapper (`makeRuntime()`) resolves relative paths against the document folder, since the wasm has no cwd (all file requests funnel through the `glob`/`checkFile` runtime hooks). Special routes: statements with `FROM ggsql:dataset` (builtins only exist in the ggsql context, resolved *unquoted*; registered best-effort at startup, may need network) go wholly to ggsql-wasm, as do statements where our scanner and ggsql's `has_visual()` disagree (parser wins, avoiding seam mis-splits); the reverse disagreement runs as plain SQL on duckdb. Errors are stage-tagged (`DuckDB: ...` / `ggsql: ...`). Both engines execute synchronously — the worker keeps the extension host responsive and makes cancellation possible (`worker.terminate()`, fresh worker + fresh engine state on the next run). The stale bridge parquet is deleted before each COPY (duckdb opens without truncating; a cancel mid-COPY would otherwise corrupt the next run's footer). The `ggsql.reader` setting is ignored.
+- **standalone** (default): `standalone.ts` sends the query to a `worker_threads` worker (`wasmWorker.ts` → `out/wasmWorker.js`) hosting two wasm engines, both binaries copied to `out/` by esbuild.js: **duckdb-wasm** (`@duckdb/duckdb-wasm/blocking`, `duckdb-eh.wasm`) executes the SQL, **ggsql-wasm** (`ggsql_wasm_bg.wasm`) renders the VISUALISE clause. Per statement (split at top-level semicolons, `splitStatements()` in querySplit.ts) the worker mirrors the dbt pattern: `planSplit()` (treeSplit.ts) splits at VISUALISE, the SQL part runs on duckdb via `COPY (sql) TO '<tmp>.parquet'`, the parquet is registered with ggsql as table `duckdb_result`, and the rewritten VISUALISE query produces the spec. Statements without a VISUALISE run plain on duckdb (side effects persist in its catalog across runs until cancel/reload). duckdb-wasm's NODE_FS runtime reads files referenced in queries (CSV/JSON/Parquet/globs) directly from disk — full DuckDB file support; a runtime wrapper (`makeRuntime()`) resolves relative paths against the document folder, since the wasm has no cwd (all file requests funnel through the `glob`/`checkFile` runtime hooks). Special routes: statements with `FROM ggsql:dataset` (builtins only exist in the ggsql context, resolved *unquoted*; registered best-effort at startup, may need network) go wholly to ggsql-wasm, as do statements where our splitter and ggsql's `has_visual()` disagree (parser wins, avoiding seam mis-splits); the reverse disagreement runs as plain SQL on duckdb. Errors are stage-tagged (`DuckDB: ...` / `ggsql: ...`). Both engines execute synchronously — the worker keeps the extension host responsive and makes cancellation possible (`worker.terminate()`, fresh worker + fresh engine state on the next run). The stale bridge parquet is deleted before each COPY (duckdb opens without truncating; a cancel mid-COPY would otherwise corrupt the next run's footer). The `ggsql.reader` setting is ignored.
 - **cli**: spawns `ggsql exec --reader <reader> <query>` (executable from `ggsql.executablePath`, falling back to `ggsql` on `PATH`; reader from `ggsql.reader`). The working directory is the document's folder so relative paths like `FROM 'data.csv'` resolve. The CLI writes Vega-Lite spec(s) to stdout; errors go to stderr with a non-zero exit.
+
+### Query splitting
+
+Splitting a query at the VISUALISE boundary (and picking Pattern A/B, see the dbt section) is two-tiered. The primary splitter is `planSplit()` in treeSplit.ts: it parses the statement with web-tree-sitter and the **vendored tree-sitter-ggsql grammar** (`vendor/tree-sitter-ggsql/`, compiled to `tree-sitter-ggsql.wasm`; both copied to `out/` by esbuild.js, which also aliases `web-tree-sitter` to its CJS build — the ESM build's `createRequire(import.meta.url)` breaks inside a CJS bundle). The VISUALISE boundary, the Pattern A/B decision (type of the last `sql_statement` node), and the `VISUALISE FROM` source (the `table_ref` node's `table` field) are all read off CST nodes, and DuckDB-style FROM-first statements get `SELECT * ` prepended, mirroring ggsql's own `extract_sql()`. Because the grammar is pinned to the bundled ggsql-wasm version (`scripts/update-grammar.sh`, ref recorded in `vendor/tree-sitter-ggsql/UPSTREAM`), the split cannot disagree with what the engine parses. The scanner in querySplit.ts remains as fallback — used until the grammar wasm finishes loading and whenever a statement doesn't parse cleanly (ERROR nodes) — and such runs are marked `split via scanner: ...` in the run tree. `splitStatements()` (semicolons) and the `ggsql.isDbtVisualiseFile` context key stay scanner-based: the grammar's root rule can't represent plain SQL *after* a VISUALISE statement, and the context key must be cheap and sync.
 
 Every run writes an explain-style tree to the `ggsql` output channel (helpers in logging.ts: `timestamp()`, `oneLine()`, `formatMs()`, shared `nextRunNumber()`), showing per step which engine ran what, row/spec counts, and durations:
 
@@ -95,7 +104,7 @@ The save commands (`ggsql.saveChartAsSvg`/`ggsql.saveChartAsPng`/`ggsql.saveChar
 
 `dbt.ts` adds a second execution path for `sql`/`jinja-sql` documents inside a dbt project. `context.ts` sets the `ggsql.isDbtVisualiseFile` context key (language is sql/jinja-sql + document contains a top-level `VISUALISE`/`VISUALIZE` + a `dbt_project.yml` exists upward from the file), which shows the "Render ggsql Visualization" run button (`ggsql.renderDbtFile`). The command:
 
-1. `planSplitQuery()` (querySplit.ts, shared with the standalone engine) splits the document at the top-level VISUALISE keyword (`splitVisualise()`, a scanner that skips SQL strings/comments, Jinja blocks, dollar-quoted strings, and parenthesized subqueries) and decides the shape of the run:
+1. `planSplit()` (treeSplit.ts, shared with the standalone engine) splits the document at the top-level VISUALISE keyword and decides the shape of the run:
    - *Pattern A* — the SQL part has a top-level SELECT: it goes to dbt as-is, and the render query prepends `SELECT * FROM '<cache>.json'` to the VISUALISE part.
    - *Pattern B* — no top-level SELECT (e.g. the query jumps from the last CTE straight to `VISUALISE ... FROM cte`, or there is no SQL part at all): `select * from <source>` is appended for dbt, where `<source>` is the VISUALISE clause's own FROM; for rendering, that FROM is repointed at the cache file. If neither a top-level SELECT nor a VISUALISE FROM exists, the command errors.
 2. `runDbtShow()` runs `dbt --quiet show --inline <sql> --output json --limit -1` with the dbt project root as cwd (executable from `ggsql.dbtPath`, falling back to `dbt` on PATH). dbt compiles the Jinja and executes against the project's target; rows come back as `{"show": [...]}` on stdout.
@@ -126,3 +135,5 @@ code --install-extension ggsql-<version>.vsix
 ```
 
 Watch mode for development: `npm run watch` (runs esbuild + tsc in parallel).
+
+When bumping the `ggsql-wasm` dependency, re-vendor the split grammar to the matching upstream tag: `scripts/update-grammar.sh v<version>` (needs the tree-sitter CLI devDependency; downloads wasi-sdk to `~/.cache/tree-sitter` on first wasm build) and commit the `vendor/tree-sitter-ggsql/` changes including `tree-sitter-ggsql.wasm`.

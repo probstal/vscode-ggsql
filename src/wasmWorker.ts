@@ -26,7 +26,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { initSync, GgsqlContext } from 'ggsql-wasm';
 import * as duckdb from '@duckdb/duckdb-wasm/blocking';
-import { planSplitQuery, splitStatements } from './querySplit';
+import { splitStatements } from './querySplit';
+import { initTreeSplit, planSplit } from './treeSplit';
 import { GgsqlError } from './errors';
 
 export interface WorkerRequest {
@@ -74,6 +75,10 @@ const BRIDGE_TABLE = 'duckdb_result';
 
 /** Base dir for resolving relative paths, set per request. */
 let baseDir = process.cwd();
+
+// Grammar-based VISUALISE splitting (falls back to the scanner in
+// querySplit.ts until loaded, or on parse errors).
+const treeSplitReady = initTreeSplit(__dirname);
 
 // ---------------------------------------------------------------- ggsql
 
@@ -214,13 +219,14 @@ async function runStatement(statement: string, steps: TraceStep[]): Promise<stri
         return [runOnGgsqlDirect(statement, steps, note)];
     }
 
-    const plan = planSplitQuery(statement);
+    const { plan, fallback } = planSplit(statement);
+    const splitNote = fallback && `split via scanner: ${fallback}`;
 
     if (!plan) {
         if (context.has_visual(statement)) {
-            // Our scanner missed the VISUALISE the real parser sees; let
+            // The splitter missed the VISUALISE the real parser sees; let
             // ggsql handle the whole statement rather than mangling it.
-            return [runOnGgsqlDirect(statement, steps, 'fallback: split scanner missed VISUALISE')];
+            return [runOnGgsqlDirect(statement, steps, 'fallback: splitter missed VISUALISE')];
         }
         // Plain SQL (CREATE TABLE, INSERT, bare SELECT, ...) — side
         // effects live in the duckdb catalog for later statements.
@@ -228,10 +234,10 @@ async function runStatement(statement: string, steps: TraceStep[]): Promise<stri
         const startedAt = Date.now();
         try {
             const table = connection.query(statement);
-            steps.push({ engine: 'duckdb', query: statement, ms: Date.now() - startedAt, rows: table.numRows });
+            steps.push({ engine: 'duckdb', query: statement, ms: Date.now() - startedAt, rows: table.numRows, note: splitNote });
             return [];
         } catch (e) {
-            throw stepError(steps, { engine: 'duckdb', query: statement }, startedAt, e);
+            throw stepError(steps, { engine: 'duckdb', query: statement, note: splitNote }, startedAt, e);
         }
     }
 
@@ -264,9 +270,9 @@ async function runStatement(statement: string, steps: TraceStep[]): Promise<stri
             `COPY (${plan.sql}) TO '${bridgeFile.replace(/'/g, "''")}' (FORMAT parquet)`
         );
         rows = Number(copyResult.toArray()[0]?.Count ?? 0);
-        steps.push({ engine: 'duckdb', query: plan.sql, ms: Date.now() - sqlStartedAt, rows });
+        steps.push({ engine: 'duckdb', query: plan.sql, ms: Date.now() - sqlStartedAt, rows, note: splitNote });
     } catch (e) {
-        throw stepError(steps, { engine: 'duckdb', query: plan.sql }, sqlStartedAt, e);
+        throw stepError(steps, { engine: 'duckdb', query: plan.sql, note: splitNote }, sqlStartedAt, e);
     }
 
     const renderQuery = plan.buildRenderQuery(BRIDGE_TABLE);
@@ -293,6 +299,7 @@ async function handle(request: WorkerRequest): Promise<void> {
     baseDir = request.cwd ?? process.cwd();
     const trace: StatementTrace[] = [];
     try {
+        await treeSplitReady;
         const statements = splitStatements(request.query);
         const specs: string[] = [];
         for (let i = 0; i < statements.length; i++) {
