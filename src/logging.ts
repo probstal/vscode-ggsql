@@ -1,22 +1,26 @@
 import * as vscode from 'vscode';
 
-// Output channel for logging
-export const outputChannel = vscode.window.createOutputChannel('ggsql');
+/*
+ * Log output channel. Entries are timestamped by the channel itself, and
+ * the user picks the verbosity per channel (gear icon in the Output
+ * panel, or the "Developer: Set Log Level..." command). Run trees log at
+ * info with queries collapsed to one line; the full untruncated queries
+ * follow at debug level.
+ */
+export const outputChannel = vscode.window.createOutputChannel('ggsql', { log: true });
 
 export function log(message: string): void {
-    outputChannel.appendLine(`[${timestamp()}] ${message}`);
+    outputChannel.info(message);
 }
 
-/** Append preformatted (possibly multi-line) text, e.g. a run tree. */
+/** Log a preformatted (possibly multi-line) block, e.g. a run tree. */
 export function logRaw(text: string): void {
-    outputChannel.appendLine(text);
+    outputChannel.info(text);
 }
 
-/** HH:MM:SS.mmm — every run-tree line carries one. */
-export function timestamp(): string {
-    const d = new Date();
-    const pad = (n: number, w = 2) => String(n).padStart(w, '0');
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+/** Untruncated details, hidden until the channel's log level is Debug. */
+export function logDebug(text: string): void {
+    outputChannel.debug(text);
 }
 
 /** Collapse whitespace and truncate, for quoting queries in log lines. */

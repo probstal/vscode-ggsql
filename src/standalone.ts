@@ -11,7 +11,7 @@ import { Worker } from 'worker_threads';
 import { GgsqlError, QueryCancelledError } from './errors';
 import type { RunOptions, RunResult } from './runner';
 import type { StatementTrace, WorkerRequest, WorkerResponse } from './wasmWorker';
-import { formatMs, log, logRaw, nextRunNumber, oneLine, timestamp } from './logging';
+import { formatMs, log, logDebug, logRaw, nextRunNumber, oneLine } from './logging';
 
 let worker: Worker | undefined;
 let requestSeq = 0;
@@ -73,7 +73,7 @@ export function disposeStandalone(): void {
 /**
  * Format a run's trace as a tree, one line per engine step:
  *
- * [12:03:12.345] run #3 · standalone · 45ms · cwd: /Users/x/proj
+ * run #3 · standalone · ok · 45ms · cwd: /Users/x/proj
  * ├─ statement 1/2
  * │  ├─ duckdb ▸ SELECT city, temp FROM 'weather.csv'  → 365 rows · 12ms
  * │  └─ ggsql ▸ SELECT * FROM 'duckdb_result' VISUALISE …  → 1 spec · 4ms
@@ -88,7 +88,7 @@ function formatTrace(
     outcome: string,
 ): string {
     const lines = [
-        `[${timestamp()}] run #${runNumber} · standalone · ${outcome} · ${formatMs(totalMs)} · cwd: ${cwd ?? process.cwd()}`,
+        `run #${runNumber} · standalone · ${outcome} · ${formatMs(totalMs)} · cwd: ${cwd ?? process.cwd()}`,
     ];
     const single = trace.length === 1;
     trace.forEach((statement, i) => {
@@ -110,6 +110,25 @@ function formatTrace(
         });
     });
     return lines.join('\n');
+}
+
+/**
+ * Debug-level companion to the run tree: every step's query (and error)
+ * untruncated, for inspecting what exactly each engine received.
+ */
+function formatFullQueries(runNumber: number, trace: StatementTrace[]): string {
+    const single = trace.length === 1;
+    const blocks: string[] = [];
+    for (const statement of trace) {
+        for (const step of statement.steps) {
+            const heading = single
+                ? step.engine
+                : `statement ${statement.index}/${statement.total} · ${step.engine}`;
+            const error = step.error !== undefined ? `\n✕ ${step.error}` : '';
+            blocks.push(`── ${heading} ──\n${step.query}${error}`);
+        }
+    }
+    return `run #${runNumber} full queries:\n${blocks.join('\n')}`;
 }
 
 /**
@@ -151,12 +170,15 @@ export async function runStandalone(query: string, options: RunOptions): Promise
         });
     } catch (e) {
         if (e instanceof QueryCancelledError) {
-            logRaw(`[${timestamp()}] run #${runNumber} · standalone · cancelled after ${formatMs(Date.now() - startedAt)}`);
+            logRaw(`run #${runNumber} · standalone · cancelled after ${formatMs(Date.now() - startedAt)}`);
         }
         throw e;
     }
 
     logRaw(formatTrace(runNumber, options.cwd, response.trace, Date.now() - startedAt, response.ok ? 'ok' : 'failed'));
+    if (response.trace.some(statement => statement.steps.length > 0)) {
+        logDebug(formatFullQueries(runNumber, response.trace));
+    }
 
     if (!response.ok || !response.specs) {
         throw new GgsqlError(response.error ?? 'The standalone engine returned no result.');

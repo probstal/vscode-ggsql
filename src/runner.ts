@@ -11,7 +11,7 @@ import * as cp from 'child_process';
 import * as path from 'path';
 import { GgsqlError, QueryCancelledError } from './errors';
 import { runStandalone } from './standalone';
-import { formatMs, log, logRaw, nextRunNumber, oneLine, timestamp } from './logging';
+import { formatMs, log, logDebug, logRaw, nextRunNumber, oneLine } from './logging';
 
 export { GgsqlError, QueryCancelledError } from './errors';
 
@@ -103,10 +103,14 @@ export function runQuery(query: string, options: RunOptions = {}): Promise<RunRe
     const startedAt = Date.now();
     log(`run #${runNumber} · cli · started (${executable} exec --reader ${reader})`);
 
-    const logCliRun = (outcome: string, result: string) => {
+    const logCliRun = (outcome: string, result: string, fullError?: string) => {
         logRaw(
-            `[${timestamp()}] run #${runNumber} · cli · ${outcome} · ${formatMs(Date.now() - startedAt)} · cwd: ${options.cwd ?? process.cwd()}\n` +
+            `run #${runNumber} · cli · ${outcome} · ${formatMs(Date.now() - startedAt)} · cwd: ${options.cwd ?? process.cwd()}\n` +
             `└─ ggsql-cli ▸ ${oneLine(query)}  → ${result}`
+        );
+        logDebug(
+            `run #${runNumber} full query:\n── ggsql-cli ──\n${query}` +
+            (fullError ? `\n✕ ${fullError}` : '')
         );
     };
 
@@ -136,7 +140,7 @@ export function runQuery(query: string, options: RunOptions = {}): Promise<RunRe
                         return;
                     }
                     const message = stderr.trim() || error.message;
-                    logCliRun('failed', `✕ ${oneLine(message, 120)}`);
+                    logCliRun('failed', `✕ ${oneLine(message, 120)}`, message);
                     reject(new GgsqlError(message));
                     return;
                 }

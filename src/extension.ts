@@ -16,7 +16,7 @@ import { initTreeSplit, planSplit } from './treeSplit';
 import { findDbtProjectRoot, runDbtShow, writeRowsCache } from './dbt';
 import { disposeStandalone } from './standalone';
 import { GgsqlResultPanel } from './panel';
-import { formatMs, log, logRaw, oneLine, outputChannel, timestamp } from './logging';
+import { formatMs, log, logDebug, logRaw, oneLine, outputChannel } from './logging';
 
 /**
  * Default file name (without extension) for saving charts produced by a
@@ -165,9 +165,10 @@ async function runDbtVisualisation(
                 const dbtStartedAt = Date.now();
                 const rows = await runDbtShow(plan.sql, projectRoot, controller.signal);
                 logRaw(
-                    `[${timestamp()}] dbt · ${path.basename(document.uri.fsPath)} · project: ${projectRoot}\n` +
+                    `dbt · ${path.basename(document.uri.fsPath)} · project: ${projectRoot}\n` +
                     `└─ dbt ▸ dbt show --inline ${oneLine(plan.sql)}  → ${rows.length} rows · ${formatMs(Date.now() - dbtStartedAt)} · handing off to renderer ↓`
                 );
+                logDebug(`dbt full query:\n── dbt show --inline ──\n${plan.sql}`);
                 if (rows.length === 0) {
                     throw new GgsqlError('The dbt query returned no rows.');
                 }

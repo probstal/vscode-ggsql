@@ -78,16 +78,18 @@ Every run command flows through `runner.ts` (`runQuery()`), which dispatches on 
 
 Splitting a query at the VISUALISE boundary (and picking Pattern A/B, see the dbt section) is two-tiered. The primary splitter is `planSplit()` in treeSplit.ts: it parses the statement with web-tree-sitter and the **vendored tree-sitter-ggsql grammar** (`vendor/tree-sitter-ggsql/`, compiled to `tree-sitter-ggsql.wasm`; both copied to `out/` by esbuild.js, which also aliases `web-tree-sitter` to its CJS build — the ESM build's `createRequire(import.meta.url)` breaks inside a CJS bundle). The VISUALISE boundary, the Pattern A/B decision (type of the last `sql_statement` node), and the `VISUALISE FROM` source (the `table_ref` node's `table` field) are all read off CST nodes, and DuckDB-style FROM-first statements get `SELECT * ` prepended, mirroring ggsql's own `extract_sql()`. Because the grammar is pinned to the bundled ggsql-wasm version (`scripts/update-vendor.sh`, ref recorded in `vendor/tree-sitter-ggsql/UPSTREAM`), the split cannot disagree with what the engine parses. The scanner in querySplit.ts remains as fallback — used until the grammar wasm finishes loading and whenever a statement doesn't parse cleanly (ERROR nodes) — and such runs are marked `split via scanner: ...` in the run tree. `splitStatements()` (semicolons) and the `ggsql.isDbtVisualiseFile` context key stay scanner-based: the grammar's root rule can't represent plain SQL *after* a VISUALISE statement, and the context key must be cheap and sync.
 
-Every run writes an explain-style tree to the `ggsql` output channel (helpers in logging.ts: `timestamp()`, `oneLine()`, `formatMs()`, shared `nextRunNumber()`), showing per step which engine ran what, row/spec counts, and durations:
+Every run writes an explain-style tree to the `ggsql` output channel (helpers in logging.ts: `oneLine()`, `formatMs()`, shared `nextRunNumber()`), showing per step which engine ran what, row/spec counts, and durations:
 
 ```
-[12:03:12.345] run #3 · standalone · ok · 45ms · cwd: /Users/x/proj
+run #3 · standalone · ok · 45ms · cwd: /Users/x/proj
 ├─ statement 1/2
 │  ├─ duckdb ▸ SELECT city, temp FROM 'weather.csv'  → 365 rows · 12ms
 │  └─ ggsql ▸ SELECT * FROM 'duckdb_result' VISUALISE …  → 1 spec · 4ms
 └─ statement 2/2
    └─ duckdb ▸ CREATE TABLE t AS …  → 0 rows · 3ms
 ```
+
+The channel is a `LogOutputChannel` (`createOutputChannel('ggsql', { log: true })`): VS Code timestamps every entry and the user sets the per-channel verbosity via the Output panel's gear icon or the "Developer: Set Log Level..." command. Trees log at *info* with queries collapsed and truncated (`oneLine()`); each tree is followed at *debug* level by a `run #N full queries:` block with every step's query and error untruncated (`formatFullQueries()` in standalone.ts, and equivalents on the cli/dbt paths) — switch the channel to Debug to inspect exactly what each engine received.
 
 The trace is produced in the worker (`TraceStep`/`StatementTrace` in wasmWorker.ts) and formatted by `formatTrace()` in standalone.ts; CLI runs log an equivalent single-step tree from runner.ts; the dbt path logs its `dbt show` step (rows + duration) before handing off to the renderer run.
 
