@@ -2,7 +2,7 @@
   "name": "vscode-ggsql",
   "displayName": "ggsql",
   "description": "Language support for ggsql: render charts directly from SQL in VS Code with dbt support",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "probstal",
   "engines": {
     "vscode": "^1.75.0"
@@ -186,8 +186,8 @@
             "cli"
           ],
           "enumDescriptions": [
-            "Bundled WebAssembly engines — works out of the box, no installation. SQL runs on DuckDB (full file support: CSV, JSON, Parquet, globs), the VISUALISE clause is rendered by ggsql.",
-            "The ggsql CLI (see ggsql.executablePath) — required for custom readers (ggsql.reader) such as persistent DuckDB databases or ODBC sources."
+            "Uses bundled WebAssembly engines and works out of the box, no installation. SQL runs on DuckDB (full file support: CSV, JSON, Parquet, globs), the VISUALISE clause is rendered by ggsql.",
+            "Uses the ggsql CLI (see ggsql.executablePath). Required for custom readers (ggsql.reader) such as persistent DuckDB databases or ODBC sources."
           ],
           "default": "standalone",
           "description": "How queries are executed."
