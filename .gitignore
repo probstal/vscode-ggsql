@@ -59,6 +59,7 @@ venv/
 !src/data/*.parquet
 !doc/assets/data/*.csv
 !doc/gallery/examples/*.csv
+!vendor/ggsql-datasets/*.parquet
 
 # Configuration files
 .env
