@@ -342,6 +342,14 @@ async function runStatement(statement: string, steps: TraceStep[]): Promise<stri
 
 async function handle(request: WorkerRequest): Promise<void> {
     baseDir = request.cwd ?? process.cwd();
+    // Data files may have changed on disk between runs, and duckdb-wasm's
+    // filesystem caches every file it touched (size + open fd — which
+    // after an editor's atomic save even points at the old inode). Forget
+    // them so each run re-reads from disk; files with open handles (e.g.
+    // an attached database) are skipped.
+    if (duck) {
+        (await duck).bindings.dropFiles();
+    }
     const trace: StatementTrace[] = [];
     try {
         await treeSplitReady;
